@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { localRequest, querySchema, readQuery, searchKnowledge } from '../lib/server';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sameOriginRequest, querySchema, readQuery, searchKnowledge } from '../lib/server';
 import { POST as session } from '../app/api/session/route';
 import { POST as search } from '../app/api/search/route';
 import { releaseResources } from '../lib/cleanup';
@@ -8,23 +8,69 @@ import { ASSISTANT_BASELINE } from '../lib/assistant-instructions';
 function request(body: unknown = { query: 'Opening hours?' }, origin = 'http://localhost:3000') {
   return new Request('http://localhost:3000/api/search', { method: 'POST', headers: { host: 'localhost:3000', origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
+beforeEach(() => { vi.stubEnv('APP_ORIGIN', ''); vi.stubEnv('VERCEL_ENV', ''); });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe('local boundary and input', () => {
   it('requires exact local same-origin host and rejects proxy forwarding', () => {
-    expect(localRequest(request())).toBe(true);
-    expect(localRequest(request({}, 'https://evil.example'))).toBe(false);
+    expect(sameOriginRequest(request())).toBe(true);
+    expect(sameOriginRequest(request({}, 'https://evil.example'))).toBe(false);
     const forwarded = request(); forwarded.headers.set('x-forwarded-host', 'external.example');
-    expect(localRequest(forwarded)).toBe(false);
+    expect(sameOriginRequest(forwarded)).toBe(false);
     const external = new Request('https://example.com/api/session', { headers: { host: 'example.com', origin: 'https://example.com' } });
-    expect(localRequest(external)).toBe(false);
+    expect(sameOriginRequest(external)).toBe(false);
   });
   it('accepts loopback requests when Next normalizes the internal URL to localhost', () => {
     const normalized = new Request('http://localhost:3000/api/search', { headers: {
       host: '127.0.0.1:3000', origin: 'http://127.0.0.1:3000', 'x-forwarded-host': '127.0.0.1:3000',
     } });
-    expect(localRequest(normalized)).toBe(true);
+    expect(sameOriginRequest(normalized)).toBe(true);
     normalized.headers.set('origin', 'http://localhost:3000');
-    expect(localRequest(normalized)).toBe(false);
+    expect(sameOriginRequest(normalized)).toBe(false);
+  });
+  function hosted(origin = 'https://voice.example', host = 'voice.example') {
+    return new Request('http://localhost:3000/api/session', { method: 'POST', headers: { host, origin, 'x-forwarded-host': host, 'sec-fetch-site': 'same-origin' } });
+  }
+  it('allows only the configured HTTPS production origin behind a proxy', () => {
+    vi.stubEnv('APP_ORIGIN', 'https://voice.example/');
+    expect(sameOriginRequest(hosted())).toBe(true);
+    expect(sameOriginRequest(hosted('https://evil.example'))).toBe(false);
+    expect(sameOriginRequest(hosted('https://voice.example', 'evil.example'))).toBe(false);
+    expect(sameOriginRequest(hosted('http://voice.example'))).toBe(false);
+    expect(sameOriginRequest(hosted('null'))).toBe(false);
+    const crossSite = hosted(); crossSite.headers.set('sec-fetch-site', 'cross-site');
+    expect(sameOriginRequest(crossSite)).toBe(false);
+    const missingOrigin = hosted(); missingOrigin.headers.delete('origin');
+    expect(sameOriginRequest(missingOrigin)).toBe(false);
+    const forwarded = hosted(); forwarded.headers.set('x-forwarded-host', 'evil.example');
+    expect(sameOriginRequest(forwarded)).toBe(false);
+  });
+  it('uses the Vercel production domain automatically but never trusts arbitrary previews', () => {
+    vi.stubEnv('APP_ORIGIN', '');
+    vi.stubEnv('VERCEL_ENV', 'production');
+    vi.stubEnv('VERCEL_PROJECT_PRODUCTION_URL', 'voice.example');
+    expect(sameOriginRequest(hosted())).toBe(true);
+    expect(sameOriginRequest(hosted('https://other.vercel.app', 'other.vercel.app'))).toBe(false);
+    vi.stubEnv('APP_ORIGIN', 'https://custom.example');
+    expect(sameOriginRequest(hosted())).toBe(false);
+    expect(sameOriginRequest(hosted('https://custom.example', 'custom.example'))).toBe(true);
+    vi.stubEnv('APP_ORIGIN', ''); vi.stubEnv('VERCEL_ENV', 'preview');
+    expect(sameOriginRequest(hosted())).toBe(false);
+  });
+  it.each(['not-a-url', 'http://voice.example', 'https://voice.example/path', 'https://user:pass@voice.example', 'https://voice.example?query=1', 'https://voice.example#hash'])('fails closed for invalid APP_ORIGIN %s', configured => {
+    vi.stubEnv('APP_ORIGIN', configured);
+    expect(sameOriginRequest(hosted())).toBe(false);
+  });
+  it('passes the hosted origin check for both session and search routes', async () => {
+    vi.stubEnv('APP_ORIGIN', 'https://voice.example');
+    vi.stubEnv('OPENAI_API_KEY', 'server-secret');
+    vi.stubEnv('RAG_WRAPPER_URL', '');
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ value: 'ek_temporary' }));
+    vi.stubGlobal('fetch', fetcher);
+    expect((await session(hosted())).status).toBe(200);
+    const searchRequest = new Request('http://localhost:3000/api/search', { method: 'POST', headers: {
+      host: 'voice.example', origin: 'https://voice.example', 'Content-Type': 'application/json',
+    }, body: JSON.stringify({ query: 'Opening hours?' }) });
+    expect((await search(searchRequest)).status).toBe(200);
   });
   it.each([{}, { query: '' }, { query: ' ' }, { query: 'x'.repeat(1001) }, { query: 'ok', tenant: 'other' }, { query: 4 }])('rejects invalid query %j', body => {
     expect(querySchema.safeParse(body).success).toBe(false);

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { assistantInstructions } from './assistant-instructions';
 
 export const querySchema = z.object({ query: z.string().trim().min(1).max(1000) }).strict();
-export function localRequest(request: Request) {
+export function sameOriginRequest(request: Request) {
   const url = new URL(request.url);
   const host = request.headers.get('host');
   const origin = request.headers.get('origin');
@@ -11,11 +11,24 @@ export function localRequest(request: Request) {
   // Next normalizes request.url to localhost even for 127.0.0.1 requests.
   let external: URL;
   try { external = new URL(`${url.protocol}//${host}`); } catch { return false; }
+  if (external.host !== host
+    || (request.headers.has('x-forwarded-host') && request.headers.get('x-forwarded-host') !== host)
+    || request.headers.get('sec-fetch-site') === 'cross-site') return false;
+
+  // Never derive the allowed public origin from untrusted request headers.
+  const configured = process.env.APP_ORIGIN?.trim()
+    || (process.env.VERCEL_ENV === 'production' && process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : '');
+  if (configured) {
+    try {
+      const allowed = new URL(configured);
+      return allowed.protocol === 'https:' && !allowed.username && !allowed.password
+        && allowed.pathname === '/' && !allowed.search && !allowed.hash
+        && origin === allowed.origin && host === allowed.host;
+    } catch { return false; }
+  }
   return ['localhost', '127.0.0.1', '[::1]'].includes(external.hostname)
-    && external.host === host
-    && origin === external.origin
-    && (!request.headers.has('x-forwarded-host') || request.headers.get('x-forwarded-host') === host)
-    && request.headers.get('sec-fetch-site') !== 'cross-site';
+    && origin === external.origin;
 }
 export function json(data: unknown, status = 200) {
   return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });

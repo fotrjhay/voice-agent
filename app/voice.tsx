@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { releaseResources } from '../lib/cleanup';
 import { createVoiceTurns } from '../lib/voice-turns';
 import styles from './voice.module.css';
@@ -11,7 +11,28 @@ function MicIcon({ muted = false }: { muted?: boolean }) {
 
 type Resources = Parameters<typeof releaseResources>[0];
 type Line = { id: string; who: string; text: string };
+function preferredTheme() {
+  try {
+    const saved = localStorage.getItem('fjo-voice-theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch { /* Theme switching still works when storage is unavailable. */ }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function subscribeTheme(change: () => void) {
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  media.addEventListener('change', change);
+  window.addEventListener('storage', change);
+  return () => { media.removeEventListener('change', change); window.removeEventListener('storage', change); };
+}
 export default function Voice({ business }: { business: string }) {
+  const preferred = useSyncExternalStore(subscribeTheme, preferredTheme, () => 'light');
+  const [themeOverride, setThemeOverride] = useState<string | null>(null);
+  const theme = themeOverride || preferred;
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setThemeOverride(next);
+    try { localStorage.setItem('fjo-voice-theme', next); } catch { /* Optional persistence. */ }
+  }
   const active = useRef<Resources | null>(null);
   const [status, setStatus] = useState('Ready');
   const [connected, setConnected] = useState(false);
@@ -213,10 +234,10 @@ export default function Voice({ business }: { business: string }) {
     stream.getAudioTracks().forEach(track => { track.enabled = muted; });
     setMuted(!muted);
   }
-  return <main className={styles.page}>
+  return <main className={styles.page} data-theme={theme}>
     <header className={styles.header}>
       <Link className={styles.wordmark} href="/" aria-label="FJO voice home">FJO</Link>
-      <nav aria-label="Main navigation"><a href="https://jayeola.com">Portfolio</a><Link href="/" aria-current="page">Voice</Link><a href="https://chat.jayeola.com">Chat</a></nav>
+      <nav aria-label="Main navigation"><a href="https://jayeola.com">Portfolio</a><Link href="/" aria-current="page">Voice</Link><a href="https://chat.jayeola.com">Chat</a><button className={styles.themeToggle} onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} aria-pressed={theme === 'dark'}>{theme === 'dark' ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M20.5 14A9 9 0 0 1 10 3.5 9 9 0 1 0 20.5 14Z" /></svg>}</button></nav>
     </header>
     <div className={styles.layout}>
       <section className={styles.conversation} aria-label={`Voice conversation with ${business}`}>
@@ -235,7 +256,7 @@ export default function Voice({ business }: { business: string }) {
             <button className={styles.end} onClick={() => end()} disabled={!busy && !connected}><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 9c5-4 13-4 18 0 1 .8 1 3 0 4l-1 1-5-2v-2a17 17 0 0 0-6 0v2l-5 2-1-1c-1-1-1-3 0-4Z" /></svg>End conversation</button>
           </div>
         </div>
-        <p className={styles.hint}>{connected ? 'Talk naturally. You can interrupt whenever you need to.' : 'Microphone access requested when you start.'}</p>
+        <p className={styles.hint}>For the best audio experience, use earphones or a headset.</p>
         {audioBlocked && <button className={styles.audioButton} onClick={async () => { try { await active.current?.audio?.play(); setAudioBlocked(false); } catch { setError('Audio playback is blocked. Enable sound for this site and retry.'); } }}>Enable assistant audio</button>}
         {error && <p role="alert" className={styles.error}>{error}</p>}
         <div className={styles.conversationFooter}><a className={styles.contact} href="mailto:fortuneolafadehan@gmail.com">Discuss an automation<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg></a><span>A conversation with {business} · No audio or transcript saved by this page.</span></div>

@@ -119,4 +119,3 @@
   .empty { min-height: 0; }
   .footer { padding: 20px 4.5%; }
 }
-@media(prefers-reduced-motion:no-preference) { .active .ring { animation: breathe 2s ease-in-out infinite; } .speaking .ring { animation-duration: .7s; } @keyframes breathe { 50% { opacity: .65; transform: rotate(-5deg) scale(.97); } } }

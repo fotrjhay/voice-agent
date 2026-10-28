@@ -194,8 +194,9 @@ describe('session secrets', () => {
 });
 it('cleanup aborts requests, stops every track, closes WebRTC and detaches audio', () => {
   const abort = new AbortController(); const stop = vi.fn(); const closePeer = vi.fn(); const closeChannel = vi.fn(); const pause = vi.fn();
-  const audio = { pause, srcObject: {} };
+  const audio = { pause, srcObject: {} }; const stopMeter = vi.fn();
   releaseResources({ abort, stream: { getTracks: () => [{ stop }, { stop }] } as unknown as MediaStream,
-    peer: { close: closePeer } as unknown as RTCPeerConnection, channel: { close: closeChannel } as unknown as RTCDataChannel, audio: audio as unknown as HTMLAudioElement });
+    peer: { close: closePeer } as unknown as RTCPeerConnection, channel: { close: closeChannel } as unknown as RTCDataChannel, audio: audio as unknown as HTMLAudioElement, stopMeter });
+  expect(stopMeter).toHaveBeenCalledOnce();
   expect(abort.signal.aborted).toBe(true); expect(stop).toHaveBeenCalledTimes(2); expect(closePeer).toHaveBeenCalledOnce(); expect(closeChannel).toHaveBeenCalledOnce(); expect(pause).toHaveBeenCalledOnce(); expect(audio.srcObject).toBeNull();
 });

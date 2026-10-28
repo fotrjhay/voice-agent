@@ -20,11 +20,13 @@ export default function Voice({ business }: { business: string }) {
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [lines, setLines] = useState<Line[]>([]);
   const [retrievalMs, setRetrievalMs] = useState<number | null>(null);
+  const [level, setLevel] = useState(0);
 
   function end(message = 'Ended') {
     const resources = active.current;
     active.current = null;
     if (resources) releaseResources(resources);
+    setLevel(0);
     setConnected(false); setBusy(false); setMuted(false); setAudioBlocked(false); setStatus(message);
   }
   useEffect(() => () => {
@@ -43,9 +45,57 @@ export default function Voice({ business }: { business: string }) {
     resources.timer = setTimeout(() => fail('Connection timed out. Check your network and try again.'), 35000);
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) throw new Error('Use a browser with microphone and WebRTC support on localhost.');
+      // Resume from the start-button gesture, including on mobile browsers.
+      let context: AudioContext | undefined;
+      let microphone: AnalyserNode | undefined;
+      let assistant: AnalyserNode | undefined;
+      let frame = 0;
+      const sources: MediaStreamAudioSourceNode[] = [];
+      try {
+        context = new AudioContext();
+        void context.resume().catch(() => {});
+      } catch { /* Audio metering is optional; voice can still work. */ }
+      const observe = (input: MediaStream) => {
+        if (!context || context.state === 'closed') return;
+        try {
+          const source = context.createMediaStreamSource(input);
+          const analyser = context.createAnalyser();
+          analyser.fftSize = 512;
+          source.connect(analyser);
+          sources.push(source);
+          return analyser;
+        } catch { return undefined; }
+      };
+      resources.stopMeter = () => {
+        cancelAnimationFrame(frame);
+        sources.forEach(source => source.disconnect());
+        microphone?.disconnect(); assistant?.disconnect();
+        void context?.close().catch(() => {});
+      };
+      const samples = new Float32Array(512);
+      const volume = (analyser?: AnalyserNode) => {
+        if (!analyser) return 0;
+        analyser.getFloatTimeDomainData(samples);
+        return Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+      };
+      let smoothed = 0, lastPaint = 0;
+      const measure = (time: number) => {
+        if (!current()) return;
+        if (time - lastPaint >= 50) {
+          const input = resources.stream?.getAudioTracks().some(track => track.enabled) ? volume(microphone) : 0;
+          const output = resources.audio && !resources.audio.paused ? volume(assistant) : 0;
+          const target = Math.min(1, Math.max(0, Math.max(input, output) - 0.008) * 8);
+          smoothed += (target - smoothed) * (target > smoothed ? 0.65 : 0.25);
+          setLevel(smoothed);
+          lastPaint = time;
+        }
+        frame = requestAnimationFrame(measure);
+      };
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!current()) { stream.getTracks().forEach(t => t.stop()); return; }
       resources.stream = stream;
+      microphone = observe(stream);
+      frame = requestAnimationFrame(measure);
       stream.getTracks().forEach(t => { t.onended = () => fail('The microphone disconnected. Reconnect it and start again.'); });
       setStatus('Connecting');
       const audio = new Audio();
@@ -56,6 +106,8 @@ export default function Voice({ business }: { business: string }) {
       peer.ontrack = event => {
         if (!current()) return;
         audio.srcObject = event.streams[0] || new MediaStream([event.track]);
+        assistant?.disconnect();
+        assistant = observe(audio.srcObject as MediaStream);
         void audio.play().catch(() => { if (current()) setAudioBlocked(true); });
       };
       peer.onconnectionstatechange = () => {
@@ -171,9 +223,9 @@ export default function Voice({ business }: { business: string }) {
     <div className={styles.layout}>
       <section className={styles.conversation} aria-label={`Voice conversation with ${business}`}>
         <div className={styles.intro}><p className={styles.eyebrow}>AI assistant · Voice experience</p><h1>Let’s talk.</h1><p>Speak with Zevon</p></div>
-        <div className={`${styles.dial} ${connected && !muted ? styles.active : ''} ${status === 'Speaking' ? styles.speaking : ''}`} aria-hidden="true">
+        <div className={styles.dial} aria-hidden="true">
           <svg className={styles.ring} viewBox="0 0 320 320">
-            {Array.from({ length: 72 }, (_, i) => <line key={i} x1="160" y1={43 - Math.round((Math.sin(i * 0.47) + 1) * 7)} x2="160" y2="78" transform={`rotate(${i * 5} 160 160)`} className={i < 49 ? styles.limeBar : styles.dimBar} />)}
+            {Array.from({ length: 72 }, (_, i) => <line key={i} x1="160" y1={43 - Math.round((Math.sin(i * 0.47) + 1) * 7)} x2="160" y2="78" transform={`rotate(${i * 5} 160 160)`} className={i < Math.round(level * 72) ? styles.limeBar : styles.dimBar} />)}
           </svg>
           <div className={styles.dialCenter}><MicIcon muted={muted} /></div>
         </div>

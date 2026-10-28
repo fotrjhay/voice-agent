@@ -1,6 +1,7 @@
-export function releaseResources(resources: { abort: AbortController; stream?: MediaStream; peer?: RTCPeerConnection; channel?: RTCDataChannel; audio?: HTMLAudioElement; timer?: ReturnType<typeof setTimeout> }) {
+export function releaseResources(resources: { abort: AbortController; stream?: MediaStream; peer?: RTCPeerConnection; channel?: RTCDataChannel; audio?: HTMLAudioElement; timer?: ReturnType<typeof setTimeout>; stopMeter?: () => void }) {
   resources.abort.abort();
   clearTimeout(resources.timer);
+  resources.stopMeter?.();
   resources.stream?.getTracks().forEach(track => track.stop());
   resources.channel?.close();
   resources.peer?.close();

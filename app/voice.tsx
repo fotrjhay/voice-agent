@@ -1,6 +1,12 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { releaseResources } from '../lib/cleanup';
+import styles from './voice.module.css';
+import Link from 'next/link';
+
+function MicIcon({ muted = false }: { muted?: boolean }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M9 22h6" />{muted && <path d="m3 3 18 18" />}</svg>;
+}
 
 type Resources = Parameters<typeof releaseResources>[0];
 type Line = { id: string; who: string; text: string };
@@ -157,19 +163,41 @@ export default function Voice({ business }: { business: string }) {
     stream.getAudioTracks().forEach(track => { track.enabled = muted; });
     setMuted(!muted);
   }
-  return <main>
-    <header><span className="brand">◉ VOICE DESK</span><span className="badge">LOCAL DEMO</span></header>
-    <section className="intro"><p className="eyebrow">A CONVERSATION WITH {business}</p><h1>Just ask.<br /><span>We’re listening.</span></h1><p>Talk naturally with an AI assistant. Ask a question, explore a follow-up, or interrupt whenever you need to.</p></section>
-    <section className="console" aria-label="Voice conversation">
-      <div className={`orb ${connected ? 'live' : ''}`} aria-hidden="true">{connected ? '≋' : '◉'}</div>
-      <p className="status" role="status" aria-live="polite">{muted ? `${status} · Microphone muted` : status}</p>
-      <p className="hint">{connected ? 'Your voice sets the pace. Speak when you’re ready.' : 'Your microphone turns on only when you start.'}</p>
-      <div className="controls"><button className="primary" onClick={start} disabled={busy || connected}>Start conversation</button><button onClick={toggleMute} disabled={!connected} aria-pressed={muted}>{muted ? 'Unmute microphone' : 'Mute microphone'}</button><button onClick={() => end()} disabled={!busy && !connected}>End conversation</button></div>
-      {audioBlocked && <button onClick={async () => { try { await active.current?.audio?.play(); setAudioBlocked(false); } catch { setError('Audio playback is blocked. Enable sound for this site and retry.'); } }}>Enable assistant audio</button>}
-      {error && <p role="alert" className="error">{error}</p>}
-      <div className="facts"><span>↔ Speak over the assistant to interrupt</span><span>⌁ No local audio or transcript storage</span></div>
-    </section>
-    <section className="transcript"><div className="section-title"><h2>Conversation</h2><button onClick={() => setLines([])} disabled={!lines.length}>Clear transcript</button></div><p>Live transcription may be imperfect. Text stays in this page’s memory until cleared or reloaded.</p><div role="log" aria-label="Conversation transcript">{lines.length ? lines.map(line => <article key={line.id}><strong>{line.who}</strong><p>{line.text}</p></article>) : <p className="empty">Your conversation will appear here.</p>}</div></section>
-    <footer><span>Business answers depend on relevant retrieved evidence.</span><span>{retrievalMs === null ? 'Retrieval timing: no measurement yet' : `Last retrieval: ${retrievalMs} ms (server measured)`}</span></footer>
+  return <main className={styles.page}>
+    <header className={styles.header}>
+      <Link className={styles.wordmark} href="/" aria-label="FJO voice home">FJO <span>VOICE</span></Link>
+      <nav aria-label="Main navigation"><a href="https://jayeola.com">Portfolio</a><Link href="/" aria-current="page">Voice</Link><a href="https://chat.jayeola.com">Chat</a></nav>
+    </header>
+    <div className={styles.layout}>
+      <section className={styles.conversation} aria-label={`Voice conversation with ${business}`}>
+        <div className={styles.intro}><p className={styles.eyebrow}>AI assistant · Voice experience</p><h1>Let’s talk.</h1><p>Speak with Zevon</p></div>
+        <div className={`${styles.dial} ${connected && !muted ? styles.active : ''} ${status === 'Speaking' ? styles.speaking : ''}`} aria-hidden="true">
+          <svg className={styles.ring} viewBox="0 0 320 320">
+            {Array.from({ length: 72 }, (_, i) => <line key={i} x1="160" y1={43 - Math.round((Math.sin(i * 0.47) + 1) * 7)} x2="160" y2="78" transform={`rotate(${i * 5} 160 160)`} className={i < 49 ? styles.limeBar : styles.dimBar} />)}
+          </svg>
+          <div className={styles.dialCenter}><MicIcon muted={muted} /></div>
+        </div>
+        <p className={styles.status} role="status" aria-live="polite"><span data-connected={connected && !muted} />{muted ? 'Microphone muted' : status}</p>
+        <div className={styles.controls}>
+          <button className={styles.start} onClick={start} disabled={busy || connected}><MicIcon />{busy ? 'Connecting…' : connected ? 'Conversation started' : 'Start conversation'}</button>
+          <div className={styles.secondaryControls}>
+            <button onClick={toggleMute} disabled={!connected} aria-pressed={muted}><MicIcon muted={!muted} />{muted ? 'Unmute conversation' : 'Mute conversation'}</button>
+            <button className={styles.end} onClick={() => end()} disabled={!busy && !connected}><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 9c5-4 13-4 18 0 1 .8 1 3 0 4l-1 1-5-2v-2a17 17 0 0 0-6 0v2l-5 2-1-1c-1-1-1-3 0-4Z" /></svg>End conversation</button>
+          </div>
+        </div>
+        <p className={styles.hint}>{connected ? 'Talk naturally. You can interrupt whenever you need to.' : 'Microphone access requested when you start.'}</p>
+        {audioBlocked && <button className={styles.audioButton} onClick={async () => { try { await active.current?.audio?.play(); setAudioBlocked(false); } catch { setError('Audio playback is blocked. Enable sound for this site and retry.'); } }}>Enable assistant audio</button>}
+        {error && <p role="alert" className={styles.error}>{error}</p>}
+        <div className={styles.conversationFooter}><a className={styles.contact} href="mailto:fortuneolafadehan@gmail.com">Discuss an automation<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6" /></svg></a><span>A conversation with {business} · No audio or transcript saved by this page.</span></div>
+      </section>
+      <section id="transcript" className={styles.transcript} aria-labelledby="transcript-title">
+        <div className={styles.transcriptHeader}><h2 id="transcript-title">Live transcript</h2><button onClick={() => setLines([])} disabled={!lines.length} aria-label="Clear transcript" title="Clear transcript"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6" /></svg></button></div>
+        <div className={styles.transcriptLog} role="log" aria-label="Conversation transcript" aria-relevant="additions text">
+          {lines.length ? lines.map(line => <article className={line.who === 'You' ? styles.userLine : styles.assistantLine} key={line.id}><strong>{line.who === 'Assistant' ? 'Zevon' : line.who}</strong><p>{line.text}</p></article>) : <div className={styles.empty}><svg viewBox="0 0 48 56" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" aria-hidden="true"><path d="M8 2h23l12 13v36a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" /><path d="M30 2v14h13M14 27h19M14 36h19M14 45h14" /></svg><p>Your conversation<br />appears here.</p></div>}
+        </div>
+        <p className={styles.transcriptNote}>Live transcription may be imperfect. Text stays in this page’s memory until cleared or reloaded.</p>
+      </section>
+    </div>
+    <footer className={styles.footer}><span>Business answers depend on relevant retrieved evidence.</span><span>{retrievalMs === null ? 'Ready when you are.' : `Last retrieval: ${retrievalMs} ms (server measured)`}</span></footer>
   </main>;
 }

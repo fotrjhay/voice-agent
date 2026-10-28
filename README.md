@@ -54,7 +54,7 @@ Supabase SSR refreshes cookies in the Next.js proxy and marks auth responses pri
 
 ## Retrieval and voice behavior
 
-The server mints a 60-second Realtime client credential using server-held keys; browser audio goes directly to OpenAI. The configurable model defaults to `gpt-realtime`, voice to `marin`, with existing input transcription/VAD/interruption behavior preserved. No second answer-writing model is used.
+The server mints a 60-second Realtime client credential using server-held keys; browser audio goes directly to OpenAI. The configurable model defaults to `gpt-realtime`, voice to `marin`. VAD detects turns and interruptions, but automatic replies are disabled: after the opening greeting, replies require a non-empty transcription of the latest user turn. Tool results may continue that reply unless interrupted. Empty or failed transcriptions do not trigger replies. Microphone capture requests echo cancellation and noise suppression. No second answer-writing model is used.
 
 `search_knowledge` forwards only a standalone query (1–1000 trimmed characters) to the fixed server wrapper. The request body is bounded to 4 KiB; wrapper search uses five results, eight seconds and a bounded response/passages. No tenant, URL or key is accepted from the browser. Empty evidence and unavailable retrieval are distinct safe results, without raw provider/database errors. A local laptop/Vercel service needs an authorized network path to a private wrapper; do not expose the private database.
 

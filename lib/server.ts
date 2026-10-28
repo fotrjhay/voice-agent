@@ -58,7 +58,7 @@ export async function searchKnowledge(query: string, signal?: AbortSignal, fetch
 export function sessionConfig(settings?: BusinessSettings) {
   return { type: 'realtime', model: process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime', output_modalities: ['audio'],
     instructions: assistantInstructions(settings),
-    audio: { input: { transcription: { model: 'gpt-4o-mini-transcribe' }, turn_detection: { type: 'server_vad', create_response: true, interrupt_response: true, silence_duration_ms: 600 } }, output: { voice: process.env.OPENAI_REALTIME_VOICE || 'marin' } },
+    audio: { input: { transcription: { model: 'gpt-4o-mini-transcribe' }, turn_detection: { type: 'server_vad', create_response: false, interrupt_response: true, silence_duration_ms: 600 } }, output: { voice: process.env.OPENAI_REALTIME_VOICE || 'marin' } },
     tools: [{ type: 'function', name: 'search_knowledge', description: 'Retrieve business facts using a self-contained question.', parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 } }, required: ['query'], additionalProperties: false } }], tool_choice: 'auto', max_output_tokens: 800,
   };
 }

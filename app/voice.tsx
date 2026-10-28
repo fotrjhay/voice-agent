@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { releaseResources } from '../lib/cleanup';
+import { createVoiceTurns } from '../lib/voice-turns';
 import styles from './voice.module.css';
 import Link from 'next/link';
 
@@ -91,7 +92,7 @@ export default function Voice({ business }: { business: string }) {
         }
         frame = requestAnimationFrame(measure);
       };
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!current()) { stream.getTracks().forEach(t => t.stop()); return; }
       resources.stream = stream;
       microphone = observe(stream);
@@ -119,11 +120,7 @@ export default function Voice({ business }: { business: string }) {
       const send = (event: unknown) => { if (current() && channel.readyState === 'open') channel.send(JSON.stringify(event)); };
       const calls = new Set<string>();
       let turn = 0;
-      let responseActive = false;
-      let continueAfterTool = false;
-      const continueResponse = () => {
-        if (continueAfterTool && !responseActive) { continueAfterTool = false; send({ type: 'response.create' }); }
-      };
+      const turns = createVoiceTurns(() => send({ type: 'response.create' }));
       const append = (id: string, who: string, text: string, delta = false) => {
         setLines(previous => {
           const existing = previous.find(line => line.id === id);
@@ -137,7 +134,7 @@ export default function Voice({ business }: { business: string }) {
         // Bound local demo sessions even if the browser is left open.
         resources.timer = setTimeout(() => { if (current()) end('Session ended after 10 minutes'); }, 600000);
         setConnected(true); setBusy(false); setStatus('Listening');
-        send({ type: 'response.create' });
+        turns.request();
       };
       channel.onclose = () => fail('Voice channel closed. Start again to reconnect.');
       channel.onerror = () => fail('Voice channel failed. Please try again.');
@@ -146,19 +143,21 @@ export default function Voice({ business }: { business: string }) {
         try {
           const event = JSON.parse(message.data);
           switch (event.type) {
-            case 'input_audio_buffer.speech_started': turn++; continueAfterTool = false; setStatus('Listening'); break;
-            case 'input_audio_buffer.speech_stopped': setStatus('Thinking'); break;
-            case 'response.created': responseActive = true; break;
+            case 'input_audio_buffer.speech_started': turn++; turns.speechStarted(event.item_id); setStatus('Listening'); break;
+            case 'input_audio_buffer.speech_stopped': turns.speechStopped(); setStatus('Listening'); break;
+            case 'response.created': turns.responseCreated(); setStatus('Thinking'); break;
             case 'output_audio_buffer.started': setStatus('Speaking'); break;
             case 'output_audio_buffer.stopped':
             case 'output_audio_buffer.cleared': setStatus('Listening'); break;
             case 'response.done':
-              responseActive = false;
               if (event.response?.status === 'failed') fail('The voice service could not answer. Please restart.');
-              else continueResponse();
+              else turns.responseDone();
               break;
-            case 'conversation.item.input_audio_transcription.completed': append(event.item_id, 'You', event.transcript); break;
-            case 'conversation.item.input_audio_transcription.failed': setError('Some speech could not be transcribed. Audio conversation may continue.'); break;
+            case 'conversation.item.input_audio_transcription.completed':
+              if (event.transcript.trim()) append(event.item_id, 'You', event.transcript);
+              turns.transcript(event.item_id, event.transcript);
+              break;
+            case 'conversation.item.input_audio_transcription.failed': setError('Some speech could not be transcribed. Please say that again.'); break;
             case 'response.output_audio_transcript.delta': append(event.item_id, 'Assistant', event.delta, true); break;
             case 'response.output_audio_transcript.done': append(event.item_id, 'Assistant', event.transcript); break;
             case 'error': fail('The voice service reported a session error. Please restart.'); break;
@@ -181,8 +180,7 @@ export default function Voice({ business }: { business: string }) {
               if (!current()) return;
               send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: event.call_id, output: JSON.stringify(output) } });
               // Keep the result in context, but do not restart an interrupted turn.
-              continueAfterTool = toolTurn === turn;
-              continueResponse();
+              if (toolTurn === turn) turns.request();
               break;
             }
           }

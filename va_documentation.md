@@ -4,8 +4,10 @@
 
 This document describes project version `0.1.0`.
 It is for developers, operators, and testers.
-The source review date is October 27, 2026.
+The source review date is October 28, 2026.
 The reviewed implementation includes commit `ea61da2`, which added hosted origin support.
+This revision describes the local Supabase Auth/Postgres and Dropbox dashboard overhaul.
+The admin implementation has not been deployed as part of this task.
 The source repository is [fotrjhay/voice-agent](https://github.com/fotrjhay/voice-agent).
 The hosted demonstration is [voice-agent-six-delta.vercel.app](https://voice-agent-six-delta.vercel.app/).
 
@@ -21,7 +23,9 @@ Code names, file names, commands, and interface labels retain their exact spelli
 The application lets a visitor speak with an AI assistant for one business.
 The assistant can search business documents through a separate service.
 The application is a demonstration.
-It has no user accounts, administration page, or document ingestion function.
+It has one administrator, a settings dashboard, and Dropbox document upload/listing.
+It has no public registration or document ingestion function.
+See [ADMIN_SETUP.md](ADMIN_SETUP.md) for the complete provisioning and migration procedure.
 
 The application uses Next.js, React, TypeScript, and OpenAI Realtime.
 The browser sends audio directly to OpenAI through WebRTC.
@@ -55,7 +59,8 @@ The server sends the query to the configured wrapper.
 The browser returns the passages to the same Realtime session.
 The assistant uses those passages to answer the question.
 
-The application does not create embeddings or change the database.
+The application does not create embeddings or change retrieval/vector data.
+Admin settings and rate-limit counters use a separate PostgreSQL schema.
 It does not use a second model to write the answer.
 
 ## 4. Requirements
@@ -136,6 +141,14 @@ Do not add the `NEXT_PUBLIC_` prefix.
 
 ### 6.1 Change the business prompt
 
+After the first saved database configuration, use `/admin` to change the business name, greeting, tone, instructions, and public support contacts.
+An authorized Save takes effect for new voice sessions without a restart or redeploy. Saves include an expected version; stale edits return HTTP 409.
+Refresh the public page to update its business label.
+Existing sessions retain their settings.
+
+The following environment procedure sets defaults before the first save, or when no database is configured.
+It does not overwrite an existing saved configuration.
+
 1. Open `.env.local`.
 2. Change `BUSINESS_NAME`, `AGENT_GREETING`, or `AGENT_INSTRUCTIONS`.
 3. Save the file.
@@ -157,6 +170,17 @@ The baseline requires AI disclosure, privacy, supported answers, and truthful ac
 The business prompt cannot add server tools.
 Instructions can be visible to the connected client.
 Do not put confidential information in them.
+
+The optional database settings are `ADMIN_DATABASE_URL`, `ADMIN_DATABASE_TLS`, and `ADMIN_DATABASE_CA`.
+Authentication uses `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, SSR cookies, verified user identity and database RLS membership. No Supabase privileged server key is required.
+Admin membership is an explicit Supabase Auth UUID inserted by the operator; authenticated users are not automatically admins.
+Tone defaults use `AGENT_TONE`; public support defaults use `SUPPORT_EMAIL`, `SUPPORT_PHONE`, and `SUPPORT_URL`.
+All are server-side variables with examples in `.env.example`.
+
+No database URL keeps environment-only voice mode and disables admin access.
+A configured database with no saved row uses validated defaults until the first authenticated Save.
+A configured but unavailable database returns explicit errors and does not silently fall back.
+The app never runs migrations or seeds at startup.
 
 ### 6.2 Connect the wrapper
 
@@ -246,7 +270,7 @@ Connection setup has a 35-second browser timeout.
 
 ## 8. API reference
 
-Both routes require matching Host and Origin headers.
+Both public voice routes require matching Host and Origin headers.
 They reject a mismatched `x-forwarded-host` header and a cross-site fetch indication.
 Invalid origin configuration prevents access.
 Responses include `Cache-Control: no-store`.
@@ -389,9 +413,11 @@ The displayed transcript is temporary page state only.
 
 ### 9.2 Conversation storage discussed for future work
 
-Conversation storage and TimescaleDB integration have been discussed but are not implemented.
-The voice app has no database connection, conversation tables, migrations, or storage environment settings.
-It does not write to the retrieval service's existing database.
+Conversation recording and TimescaleDB-specific analytics have been discussed but are not implemented.
+The app now supports PostgreSQL for business settings and admin rate limits only.
+There are no conversation tables or conversation-storage endpoints.
+The operator may choose a separate schema in an existing PostgreSQL/TimescaleDB instance or a dedicated reachable database.
+The supplied migration does not alter retrieval/vector tables or ingestion data.
 
 A possible design uses regular PostgreSQL tables within TimescaleDB for conversations, messages, business identifiers, and reviewer feedback.
 Timestamped tool events and latency measurements could use hypertables when the data volume justifies them.
@@ -411,8 +437,11 @@ A modified browser client can change Realtime session configuration.
 The application baseline is an instruction to the model, not an enforceable authorization system.
 
 The origin check does not authenticate users.
-The application has no rate limits, quotas, or server-enforced session duration.
-Add server authorization and usage controls before public or multi-business use.
+Admin operations require a server-verified Supabase user, explicit UUID membership/RLS and distributed PostgreSQL rate limits.
+Admin mutations also require a matching origin.
+Public voice routes have no application authentication, quotas, rate limits, or server-enforced session duration.
+The admin login does not protect those public routes.
+Add those controls before commercial or multi-business use.
 The assistant has no implemented tool for bookings, payments, messages, or record changes.
 
 ## 10. Project files
@@ -431,6 +460,16 @@ The assistant has no implemented tool for bookings, payments, messages, or recor
 | `tests/server.test.ts` | Tests server behavior and resource cleanup with mocks. |
 | `.env.example` | Provides example environment settings. |
 | `README.md` | Provides setup notes and previous verification records. |
+| `ADMIN_SETUP.md` | Provides Supabase provisioning, Dropbox setup, migration/rollback, limits and manual checks. |
+| `app/admin/` | Provides sign-in and the authenticated settings/document dashboard. |
+| `app/api/admin/` | Provides independently authorized settings and document endpoints. |
+| `app/api/auth/[action]/route.ts` | Runs Supabase password login, sign-out, recovery, confirmation and reset endpoints. |
+| `lib/auth.ts`, `lib/supabase/` | Verify Supabase identity, current membership and SSR cookies. |
+| `lib/settings.ts`, `lib/settings-schema.ts` | Read, validate and save business settings. |
+| `lib/db.ts`, `lib/rate-limit.ts` | Use a verified-TLS scoped database connection and distributed limits. |
+| `lib/storage.ts`, `lib/documents.ts`, `lib/upload-validation.ts` | Validate documents and manage Dropbox refresh, listing, durable IDs and idempotent uploads. |
+| `migrations/001_admin.up.sql`, `migrations/001_admin.down.sql` | Supply reviewed schema changes and rollback; never run automatically. |
+| `tests/runtime-smoke.mjs` | Tests Supabase SSR HTTP/cookie behavior against local fake Auth/SQL services. |
 
 ## 11. Verify the application
 
@@ -454,7 +493,7 @@ They cover origin checks, query validation, search limits, error handling, promp
 They do not establish live audio quality or wrapper relevance.
 This document does not report a new live service test.
 
-### 11.1 Latest recorded verification
+### 11.1 Recorded hosted-origin verification (before admin)
 
 The following checks passed on October 27, 2026, for the hosted origin fix in commit `ea61da2`:
 
@@ -474,7 +513,22 @@ Live microphone behavior, speech playback, interruption, and real retrieval qual
 Database vector dimensions, ingestion provenance, and embedding compatibility also remain unverified.
 This documentation update did not rerun the application tests or perform a new deployment check.
 
-### 11.2 Manual checks
+The preceding records refer to the hosted origin fix before the admin implementation.
+The admin verification record is in [ADMIN_SETUP.md](ADMIN_SETUP.md).
+The earlier implementation used NextAuth; the current HTTP smoke test uses Supabase SSR cookies and local fake services.
+It makes no external provider calls or live database changes.
+
+### 11.2 Admin verification
+
+The current overhaul passed all 113 mocked tests, type checking, lint, and the production build.
+The additional `npm run test:smoke` check passed with real Next.js/Supabase SSR HTTP handling and local fake Auth/SQL services.
+It verified protected routes, saved settings reads/writes, optimistic concurrency, host/origin checks, SSR cookies, sign-out cookie clearing, and revoked-session denial.
+The browser-bundle scan found no permanent credential references.
+The opt-in real RLS test reported SKIP because no disposable Supabase test database was configured.
+No live authorization, PostgreSQL migration, Dropbox upload, n8n change, or Vercel deployment was performed.
+See [ADMIN_SETUP.md](ADMIN_SETUP.md) for the recorded checks and remaining manual setup.
+
+### 11.3 Manual checks
 
 1. Start a conversation without wrapper configuration.
 2. Confirm that audio and captions work.
@@ -517,3 +571,74 @@ Do not share captures that contain client credentials or business passages.
 End unused conversations.
 API use and wrapper operation can incur charges.
 Use provider account controls to manage spending.
+
+## 13. Current admin dashboard: Supabase and Dropbox
+
+The active dashboard has two functions: assistant settings and Dropbox document upload/listing.
+GitHub OAuth and Google Drive dependencies/routes are removed from active use.
+Repository/GitHub deployment integration remains unchanged.
+Old Drive files are not moved, deleted or relabeled as Dropbox files.
+No conversation recording, analytics, billing or ingestion pipeline was added.
+
+Supabase email/password sign-in uses maintained JS/SSR packages.
+The operator must disable public sign-ups in the project, provision an Auth user, and explicitly insert its verified UUID into admin_members.
+Matching an old GitHub account email does not transfer privileges.
+Every sensitive route checks server-verified getUser() identity and current membership.
+Ordinary users cannot grant themselves membership; settings use user-scoped RLS writes.
+Recovery/invite links are verified server-side for expiry/one-time use and membership.
+Tokens arrive in browser fragments and are POSTed to confirmation, not placed in server URL queries.
+See ADMIN_SETUP.md for the required email templates and safe redirect allowlists.
+
+Cookies remain compatible with Supabase SSR: host-only, SameSite=Lax and Secure on HTTPS.
+This flow does not claim HTTP-only cookies.
+The Next.js proxy refreshes validated sessions and marks auth responses private/no-store.
+The current app no longer imposes the old NextAuth one-hour hard expiry; configure Supabase session/JWT and recovery policy.
+Sign-out clears SSR cookies and requests provider global sign-out.
+
+The existing fixed single-business settings record is reused.
+Migration 002 adds a version, explicit membership, RLS and document receipts without overwriting saved settings.
+A stale settings save returns HTTP 409; reload and review before retrying.
+The public reader uses only a scoped server SQL connection, not an anonymous settings policy or browser service-role key.
+New sessions read saved settings immediately, while existing sessions keep their initial configuration.
+The application baseline, tools, model/voice and VAD behavior are preserved.
+
+Dropbox uses one operator-authorized Scoped Access App Folder account.
+Secrets are DROPBOX_APP_KEY, DROPBOX_APP_SECRET and an offline DROPBOX_REFRESH_TOKEN.
+DROPBOX_UPLOAD_FOLDER is relative to that app namespace, for example /documents.
+Access tokens are refreshed in process memory; no environment/file rewrite occurs at runtime.
+The operator-only loopback authorization helper validates OAuth state and stores its result in an ignored local file.
+No public token/setup endpoint or per-admin Dropbox connection exists.
+
+The hard upload ceiling remains 3 MiB, below Vercel's request cap.
+DOCUMENT_MAX_UPLOAD_BYTES may lower it.
+The server validates normalized names, type/content and actual streamed bytes.
+A durable reservation maps the verified user's upload key to a server document UUID and fixed path.
+Retries verify Dropbox content hashes; add/no-autorename/conflict handling avoids duplicates and silent overwrites.
+Different selected files may share a display name without being deduplicated by name.
+Receipts preserve provider label, original display name, Dropbox file ID/revision and stable source/business IDs.
+Pagination shows actual files in the configured folder and separates listing errors from upload success.
+The success label is Uploaded to Dropbox; search availability is not yet tracked.
+
+n8n is unchanged and no webhook is active.
+It must access the same Dropbox App Folder namespace, not merely the same account through another folder app.
+Retain source_id = BUSINESS_ID:document_id across revisions; a revision is not a new logical source.
+The proposed handoff contract and read-scope setup are documented in ADMIN_SETUP.md.
+
+VOICE_APP_ORIGIN and ADMIN_APP_ORIGIN are exact server-configured origins.
+The admin host root renders the same protected admin component without external rewrites or prefix loops.
+/admin still works locally and on the current domain.
+Each host calls same-origin backend routes; cookies are not shared across subdomains.
+Unknown application hosts and cross-origin mutations are rejected.
+Use actual DNS targets from Vercel's project Domains screen.
+
+Admin limits are shared PostgreSQL buckets: auth 30/minute, reads 60, writes 20 and uploads 10.
+Sign-out is exempt from the database limiter but still checks origin.
+Supabase provider rate limits and hosting abuse controls are separate operator requirements.
+Public voice routes are not protected by admin login and still need commercial authentication/quotas.
+
+Review 001 (if absent) and 002 migrations explicitly; startup/build never applies them.
+The 002 rollback preserves saved settings but removes new membership/receipt metadata, so export it first.
+No live migration, OAuth grant, Dropbox upload, n8n change or deployment was performed during implementation.
+Use npm run test:rls only with the explicit disposable-Supabase opt-in to verify real policy behavior.
+Mock tests and local fake-service HTTP tests do not prove live policies, email delivery, Dropbox, domains or microphone behavior.
+See [ADMIN_SETUP.md](ADMIN_SETUP.md) for ordered setup, permissions, rollback and manual acceptance.

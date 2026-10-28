@@ -1,44 +1,20 @@
+import { sameOrigin } from './origins';
 import 'server-only';
 import { z } from 'zod';
 import { assistantInstructions } from './assistant-instructions';
+import type { BusinessSettings } from './settings-schema';
 
 export const querySchema = z.object({ query: z.string().trim().min(1).max(1000) }).strict();
-export function sameOriginRequest(request: Request) {
-  const url = new URL(request.url);
-  const host = request.headers.get('host');
-  const origin = request.headers.get('origin');
-  if (!host) return false;
-  // Next normalizes request.url to localhost even for 127.0.0.1 requests.
-  let external: URL;
-  try { external = new URL(`${url.protocol}//${host}`); } catch { return false; }
-  if (external.host !== host
-    || (request.headers.has('x-forwarded-host') && request.headers.get('x-forwarded-host') !== host)
-    || request.headers.get('sec-fetch-site') === 'cross-site') return false;
-
-  // Never derive the allowed public origin from untrusted request headers.
-  const configured = process.env.APP_ORIGIN?.trim()
-    || (process.env.VERCEL_ENV === 'production' && process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : '');
-  if (configured) {
-    try {
-      const allowed = new URL(configured);
-      return allowed.protocol === 'https:' && !allowed.username && !allowed.password
-        && allowed.pathname === '/' && !allowed.search && !allowed.hash
-        && origin === allowed.origin && host === allowed.host;
-    } catch { return false; }
-  }
-  return ['localhost', '127.0.0.1', '[::1]'].includes(external.hostname)
-    && origin === external.origin;
-}
+export function sameOriginRequest(request: Request) { return sameOrigin(request, 'voice'); }
 export function json(data: unknown, status = 200) {
-  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+  return Response.json(data, { status, headers: { 'Cache-Control': 'private, no-store' } });
 }
 export async function readQuery(request: Request) {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw new Error('input');
   const text = await limitedText(request, 4096);
   return querySchema.parse(JSON.parse(text));
 }
-async function limitedText(input: Request | Response, max: number) {
+export async function limitedText(input: Request | Response, max: number) {
   const reader = input.body?.getReader();
   if (!reader) throw new Error('body');
   const chunks: Uint8Array[] = [];
@@ -79,9 +55,9 @@ export async function searchKnowledge(query: string, signal?: AbortSignal, fetch
     return result(passages.length ? 'ok' : 'empty', passages);
   } catch { return result('unavailable'); }
 }
-export function sessionConfig() {
+export function sessionConfig(settings?: BusinessSettings) {
   return { type: 'realtime', model: process.env.OPENAI_REALTIME_MODEL || 'gpt-realtime', output_modalities: ['audio'],
-    instructions: assistantInstructions(),
+    instructions: assistantInstructions(settings),
     audio: { input: { transcription: { model: 'gpt-4o-mini-transcribe' }, turn_detection: { type: 'server_vad', create_response: true, interrupt_response: true, silence_duration_ms: 600 } }, output: { voice: process.env.OPENAI_REALTIME_VOICE || 'marin' } },
     tools: [{ type: 'function', name: 'search_knowledge', description: 'Retrieve business facts using a self-contained question.', parameters: { type: 'object', properties: { query: { type: 'string', minLength: 1, maxLength: 1000 } }, required: ['query'], additionalProperties: false } }], tool_choice: 'auto', max_output_tokens: 800,
   };

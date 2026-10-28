@@ -89,7 +89,10 @@
   .transcript { min-height: 0; }
   .transcriptHeader { padding: 12px 14px 8px; }
   .transcriptHeader h2 { font-size: 11px; }
-  .transcriptLog { flex: auto; height: clamp(150px, 25svh, 220px); min-height: 0; max-height: none; padding: 0 14px; }
+  .transcriptLog { flex: auto; height: clamp(240px, 38svh, 340px); min-height: 0; max-height: none; padding: 0 10px; }
+  .transcriptLog article { margin: 10px 0; padding: 10px 12px; }
+  .transcriptLog article strong { font-size: 10px; }
+  .transcriptLog article p { font-size: 13px; line-height: 1.5; margin-top: 6px; }
   .empty { min-height: 0; }
   .empty svg { width: 28px; height: 34px; }
   .empty p { font-size: 15px; margin: 10px 0; }

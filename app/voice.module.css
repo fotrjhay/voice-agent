@@ -11,12 +11,11 @@
 
 }
 .page::before { content: ''; position: fixed; inset: 0; background: #fff; z-index: -1; }
-.header { position: relative; border-bottom: 1px solid #ededeb; padding: 24px 4.5%; margin-bottom: 0; }
-.headerLabel { position: absolute; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 11px; font-weight: 700; }
-.wordmark { display: flex; align-items: center; gap: 18px; font-size: 20px; font-weight: 800; letter-spacing: -.8px; color: #050505; text-decoration: none; }
-.header nav { display: flex; align-items: center; gap: 44px; }
-.header nav a { color: #101114; text-decoration: none; font-family: var(--mono); text-transform: uppercase; letter-spacing: 1.4px; font-size: 12px; padding: 5px 0; border-bottom: 2px solid transparent; }
-.header nav a[aria-current] { border-color: var(--lime); font-weight: 400; }
+.header { min-height: 72px; border-bottom: 1px solid #dedede; padding: 0 6.5%; margin-bottom: 0; }
+.wordmark { display: flex; align-items: center; font-size: 20px; font-weight: 800; letter-spacing: -.5px; color: #050505; text-decoration: none; }
+.header nav { display: flex; align-items: center; gap: 40px; }
+.header nav a { color: #101114; text-decoration: none; font-family: var(--mono); text-transform: uppercase; letter-spacing: 1.4px; font-size: 14px; padding: 12px 0; }
+.header nav a:hover { color: #666; }
 .layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 7%; width: 100%; max-width: 1440px; margin: 0 auto; padding: 30px 4.5% 24px; flex: 1; }
 .conversation { text-align: center; min-width: 0; padding: 20px 0 0; }
 .intro h1 { color: #050505; font-size: clamp(54px, 6vw, 80px); font-weight: 800; line-height: 1.05; letter-spacing: -4px; margin: 0 0 8px; }
@@ -66,12 +65,11 @@
 .transcriptNote { font-size: 11px; color: #777c86; line-height: 1.6; padding: 14px 24px; margin: 0; border-top: 1px solid #eff0f2; }
 .footer { border-top: 1px solid #ededeb; padding: 20px 4.5%; font-size: 10px; color: #868b94; }
 
-@media(max-width:1000px) {  .layout { grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr); gap: 24px; } .header nav { gap: 12px; } .intro h1 { font-size: 60px; } .intro p { font-size: 22px; } .secondaryControls { grid-template-columns: 1fr; gap: 9px; } .transcript { min-height: 690px; } .dial { width: 270px; } }
-@media(max-width:700px) {  .header { padding: 20px 0; margin-bottom: 32px; flex-wrap: wrap; gap: 15px; } .wordmark { font-size: 20px; gap: 10px; } .wordmark span { font-size: 9px; padding: 0 0 0 10px; } .header nav { gap: 3px; } .header nav a { padding: 8px 5px; font-size: 10px; letter-spacing: .8px; } .layout { grid-template-columns: 1fr; gap: 28px; } .conversation { padding-top: 8px; } .intro h1 { font-size: 60px; letter-spacing: -3px; } .intro p { font-size: 21px; } .dial { width: 280px; } .secondaryControls { grid-template-columns: 1fr 1fr; } .page button { gap: 6px; padding: 14px 8px; font-size: 10px; letter-spacing: 0; } .page .start { font-size: 12px; } .conversationFooter { padding-top: 18px; } .transcript { min-height: 400px; } .transcriptLog { min-height: 280px; max-height: 430px; padding: 0 18px; } .empty { min-height: 280px; } .transcriptHeader { padding: 20px 18px 10px; } .transcriptNote { padding: 14px 18px; } .footer { gap: 8px; line-height: 1.5; } }
+@media(max-width:1000px) {  .layout { grid-template-columns: minmax(0, 1fr) minmax(280px, .7fr); gap: 24px; } .header nav { gap: 28px; } .intro h1 { font-size: 60px; } .intro p { font-size: 22px; } .secondaryControls { grid-template-columns: 1fr; gap: 9px; } .transcript { min-height: 690px; } .dial { width: 270px; } }
+@media(max-width:700px) {  .header nav { gap: 22px; } .header nav a { padding: 15px 0; font-size: 10px; letter-spacing: 1px; color: #737373; } .wordmark { font-size: 14px; letter-spacing: -.3px; } .layout { grid-template-columns: 1fr; gap: 28px; } .conversation { padding-top: 8px; } .intro h1 { font-size: 60px; letter-spacing: -3px; } .intro p { font-size: 21px; } .dial { width: 280px; } .secondaryControls { grid-template-columns: 1fr 1fr; } .page button { gap: 6px; padding: 14px 8px; font-size: 10px; letter-spacing: 0; } .page .start { font-size: 12px; } .conversationFooter { padding-top: 18px; } .transcript { min-height: 400px; } .transcriptLog { min-height: 280px; max-height: 430px; padding: 0 18px; } .empty { min-height: 280px; } .transcriptHeader { padding: 20px 18px 10px; } .transcriptNote { padding: 14px 18px; } .footer { gap: 8px; line-height: 1.5; } }
 @media(max-width:370px) { .secondaryControls { grid-template-columns: 1fr; } .dial { width: 250px; } .intro h1 { font-size: 52px; } }
 @media(max-width:700px) {
-  .header { padding: 18px; margin-bottom: 0; gap: 10px; }
-  .headerLabel { display: none; }
+  .header { min-height: 50px; padding: 0 22px; margin-bottom: 0; gap: 16px; flex-wrap: nowrap; }
   .conversation { padding-top: 0; }
   .intro .eyebrow { font-size: 9px; letter-spacing: 1px; margin-bottom: 8px; }
   .intro h1 { font-size: 44px; letter-spacing: -2px; margin-bottom: 5px; }
@@ -99,7 +97,6 @@
   .footer { padding: 14px 18px; font-size: 9px; }
 }
 @media(min-width:701px) {
-  .header { padding: 24px 4.5%; margin-bottom: 0; }
   .conversation { padding-top: 0; }
   .intro .eyebrow { margin-bottom: 10px; font-size: 10px; }
   .intro h1 { font-size: clamp(40px, 5.5svh, 60px); letter-spacing: -2.5px; margin-bottom: 6px; }

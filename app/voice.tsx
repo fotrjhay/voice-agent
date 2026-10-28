@@ -166,7 +166,6 @@ export default function Voice({ business }: { business: string }) {
   return <main className={styles.page}>
     <header className={styles.header}>
       <Link className={styles.wordmark} href="/" aria-label="FJO voice home">FJO</Link>
-      <span className={styles.headerLabel}>VOICE</span>
       <nav aria-label="Main navigation"><a href="https://jayeola.com">Portfolio</a><Link href="/" aria-current="page">Voice</Link><a href="https://chat.jayeola.com">Chat</a></nav>
     </header>
     <div className={styles.layout}>

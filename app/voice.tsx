@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { releaseResources } from '../lib/cleanup';
 import { createVoiceTurns } from '../lib/voice-turns';
+import type { ResponseRequest } from '../lib/voice-turns';
+import { createVoiceDiagnostics, type VoiceDiagnostics } from '../lib/voice-diagnostics';
 import styles from './voice.module.css';
 import Link from 'next/link';
 
@@ -24,7 +26,7 @@ function subscribeTheme(change: () => void) {
   window.addEventListener('storage', change);
   return () => { media.removeEventListener('change', change); window.removeEventListener('storage', change); };
 }
-export default function Voice({ business }: { business: string }) {
+export default function Voice({ business, diagnosticsAuthorized = false }: { business: string; diagnosticsAuthorized?: boolean }) {
   const preferred = useSyncExternalStore(subscribeTheme, preferredTheme, () => 'light');
   const [themeOverride, setThemeOverride] = useState<string | null>(null);
   const theme = themeOverride || preferred;
@@ -43,10 +45,25 @@ export default function Voice({ business }: { business: string }) {
   const [lines, setLines] = useState<Line[]>([]);
   const [retrievalMs, setRetrievalMs] = useState<number | null>(null);
   const [level, setLevel] = useState(0);
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(false);
+  const diagnostics = useRef<VoiceDiagnostics | null>(null);
+  const [diagnosticSummary, setDiagnosticSummary] = useState<ReturnType<VoiceDiagnostics['summary']> | null>(null);
+  const refreshDiagnostics = () => setDiagnosticSummary(diagnostics.current?.summary() ?? null);
+
+  function downloadDiagnostics() {
+    const summary = diagnostics.current?.summary();
+    if (!summary) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(summary, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'voice-diagnostics.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 
   function end(message = 'Ended') {
     const resources = active.current;
     active.current = null;
+    diagnostics.current?.end(message);
+    refreshDiagnostics();
     if (resources) releaseResources(resources);
     setLevel(0);
     setConnected(false); setBusy(false); setMuted(false); setAudioBlocked(false); setStatus(message);
@@ -54,11 +71,18 @@ export default function Voice({ business }: { business: string }) {
   useEffect(() => () => {
     const resources = active.current;
     active.current = null;
+    diagnostics.current?.end('page_unmounted');
     if (resources) releaseResources(resources);
   }, []);
 
   async function start() {
     if (active.current) return;
+    if (diagnosticsAuthorized && !diagnosticsEnabled) return;
+    const requestDiagnostics = diagnosticsAuthorized && diagnosticsEnabled;
+    const startedAt = Date.now();
+    let diagnostic: VoiceDiagnostics | null = null;
+    diagnostics.current = null;
+    setDiagnosticSummary(null);
     const resources: Resources = { abort: new AbortController() };
     active.current = resources;
     const current = () => active.current === resources && !resources.abort.signal.aborted;
@@ -138,10 +162,14 @@ export default function Voice({ business }: { business: string }) {
       stream.getTracks().forEach(t => peer.addTrack(t, stream));
       const channel = peer.createDataChannel('oai-events');
       resources.channel = channel;
-      const send = (event: unknown) => { if (current() && channel.readyState === 'open') channel.send(JSON.stringify(event)); };
+      const send = (event: Record<string, unknown>, request?: ResponseRequest) => {
+        if (current() && channel.readyState === 'open') {
+          channel.send(JSON.stringify(event));
+          diagnostic?.sent(event, request);
+        }
+      };
       const calls = new Set<string>();
-      let turn = 0;
-      const turns = createVoiceTurns(() => send({ type: 'response.create' }));
+      const turns = createVoiceTurns(request => send({ type: 'response.create', event_id: `client_${crypto.randomUUID()}` }, request));
       const append = (id: string, who: string, text: string, delta = false) => {
         setLines(previous => {
           const existing = previous.find(line => line.id === id);
@@ -155,7 +183,9 @@ export default function Voice({ business }: { business: string }) {
         // Bound local demo sessions even if the browser is left open.
         resources.timer = setTimeout(() => { if (current()) end('Session ended after 10 minutes'); }, 600000);
         setConnected(true); setBusy(false); setStatus('Listening');
-        turns.request();
+        diagnostic?.connected();
+        turns.greeting();
+        refreshDiagnostics();
       };
       channel.onclose = () => fail('Voice channel closed. Start again to reconnect.');
       channel.onerror = () => fail('Voice channel failed. Please try again.');
@@ -163,20 +193,25 @@ export default function Voice({ business }: { business: string }) {
         if (!current()) return;
         try {
           const event = JSON.parse(message.data);
+          diagnostic?.received(event);
           switch (event.type) {
-            case 'input_audio_buffer.speech_started': turn++; turns.speechStarted(event.item_id); setStatus('Listening'); break;
-            case 'input_audio_buffer.speech_stopped': turns.speechStopped(); setStatus('Listening'); break;
-            case 'response.created': turns.responseCreated(); setStatus('Thinking'); break;
+            case 'input_audio_buffer.speech_started': turns.speechStarted(event.item_id); setStatus('Listening'); break;
+            case 'input_audio_buffer.speech_stopped': turns.speechStopped(event.item_id); setStatus('Listening'); break;
+            case 'response.created': turns.responseCreated(event.response.id); setStatus('Thinking'); break;
+            case 'response.output_item.added':
+              if (event.item?.type === 'function_call') turns.toolStarted(event.response_id, event.item.call_id);
+              break;
             case 'output_audio_buffer.started': setStatus('Speaking'); break;
             case 'output_audio_buffer.stopped':
             case 'output_audio_buffer.cleared': setStatus('Listening'); break;
             case 'response.done':
+              turns.responseDone(event.response.id, event.response.status,
+                (event.response.output ?? []).filter((item: { type: string }) => item.type === 'function_call').map((item: { call_id: string }) => item.call_id));
               if (event.response?.status === 'failed') fail('The voice service could not answer. Please restart.');
-              else turns.responseDone();
               break;
             case 'conversation.item.input_audio_transcription.completed':
               if (event.transcript.trim()) append(event.item_id, 'You', event.transcript);
-              turns.transcript(event.item_id, event.transcript);
+              if (turns.transcript(event.item_id, event.transcript)) diagnostic?.completedTurn(event.item_id);
               break;
             case 'conversation.item.input_audio_transcription.failed': setError('Some speech could not be transcribed. Please say that again.'); break;
             case 'response.output_audio_transcript.delta': append(event.item_id, 'Assistant', event.delta, true); break;
@@ -185,13 +220,22 @@ export default function Voice({ business }: { business: string }) {
             case 'response.function_call_arguments.done': {
               if (calls.has(event.call_id)) break;
               calls.add(event.call_id);
-              const toolTurn = turn;
+              turns.toolStarted(event.response_id, event.call_id);
+              const retrievalStarted = performance.now();
               setStatus('Searching knowledge');
               let output: unknown = { status: 'unavailable', passages: [] };
               if (event.name === 'search_knowledge') {
+                diagnostic?.retrievalStarted(event.call_id, event.response_id);
                 try {
                   const args: unknown = JSON.parse(event.arguments);
-                  const result = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args), signal: resources.abort.signal });
+                  const result = await fetch(requestDiagnostics ? '/api/admin/voice/search' : '/api/search', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', ...(requestDiagnostics ? { 'x-voice-diagnostics': '1' } : {}) },
+                    body: JSON.stringify(args), signal: resources.abort.signal, cache: 'no-store',
+                  });
+                  if (requestDiagnostics && [400, 401, 403, 404, 503].includes(result.status)) {
+                    fail('Admin voice testing is no longer available. Check sign-in and feature access.');
+                    return;
+                  }
                   if (result.ok) {
                     output = await result.json();
                     if (current() && typeof (output as { retrieval_ms?: unknown }).retrieval_ms === 'number') setRetrievalMs((output as { retrieval_ms: number }).retrieval_ms);
@@ -199,18 +243,30 @@ export default function Voice({ business }: { business: string }) {
                 } catch { /* Return a safe tool failure; end aborts are discarded below. */ }
               }
               if (!current()) return;
+              if (event.name === 'search_knowledge') diagnostic?.retrieval(event.call_id, event.response_id, Math.round(performance.now() - retrievalStarted), output);
               send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: event.call_id, output: JSON.stringify(output) } });
               // Keep the result in context, but do not restart an interrupted turn.
-              if (toolTurn === turn) turns.request();
+              turns.toolReturned(event.response_id, event.call_id);
+              refreshDiagnostics();
               break;
             }
           }
+          if (['session.created', 'session.updated', 'response.created', 'response.done', 'conversation.item.input_audio_transcription.completed'].includes(event.type)) refreshDiagnostics();
         } catch { fail('Could not process the voice session. Please restart.'); }
       };
-      const credentialResponse = await fetch('/api/session', { method: 'POST', signal: resources.abort.signal });
+      const credentialResponse = await fetch(requestDiagnostics ? '/api/admin/voice/session' : '/api/session', {
+        method: 'POST', headers: requestDiagnostics ? { 'x-voice-diagnostics': '1' } : {}, signal: resources.abort.signal, cache: 'no-store',
+      });
       const credential = await credentialResponse.json();
       if (!credentialResponse.ok) throw new Error(credential.error || 'Could not create session.');
       if (!current()) return;
+      if (requestDiagnostics) {
+        if (!credential.diagnostics) throw new Error('Authorized diagnostics configuration was not returned.');
+        diagnostic = createVoiceDiagnostics(Date.now, startedAt);
+        diagnostics.current = diagnostic;
+        diagnostic.sessionSetup(credential.diagnostics.requested, credential.diagnostics.reported);
+        refreshDiagnostics();
+      }
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       if (!current()) return;
@@ -250,7 +306,7 @@ export default function Voice({ business }: { business: string }) {
         </div>
         <p className={styles.status} role="status" aria-live="polite"><span data-connected={connected && !muted} />{muted ? 'Microphone muted' : status}</p>
         <div className={styles.controls}>
-          <button className={styles.start} onClick={start} disabled={busy || connected}><MicIcon />{busy ? 'Connecting…' : connected ? 'Conversation started' : 'Start conversation'}</button>
+          <button className={styles.start} onClick={start} disabled={busy || connected || (diagnosticsAuthorized && !diagnosticsEnabled)}><MicIcon />{busy ? 'Connecting…' : connected ? 'Conversation started' : 'Start conversation'}</button>
           <div className={styles.secondaryControls}>
             <button onClick={toggleMute} disabled={!connected} aria-pressed={muted}><MicIcon muted={!muted} />{muted ? 'Unmute conversation' : 'Mute conversation'}</button>
             <button className={styles.end} onClick={() => end()} disabled={!busy && !connected}><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 9c5-4 13-4 18 0 1 .8 1 3 0 4l-1 1-5-2v-2a17 17 0 0 0-6 0v2l-5 2-1-1c-1-1-1-3 0-4Z" /></svg>End conversation</button>
@@ -270,5 +326,16 @@ export default function Voice({ business }: { business: string }) {
       </section>
     </div>
     <footer className={styles.footer}><span>Business answers depend on relevant retrieved evidence.</span><span>{retrievalMs === null ? 'Ready when you are.' : `Last retrieval: ${retrievalMs} ms (server measured)`}</span></footer>
+    {diagnosticsAuthorized && <details open>
+      <summary>Authorized voice diagnostics</summary>
+      <label><input type="checkbox" checked={diagnosticsEnabled} disabled={busy || connected} onChange={event => {
+        setDiagnosticsEnabled(event.target.checked);
+        if (!event.target.checked) { diagnostics.current = null; setDiagnosticSummary(null); }
+      }} /> I opt in to diagnostics for this voice test</label>
+      <p>Memory only. Contains identifiers, configuration and usage counts. No audio, transcripts, prompts, passages or credentials. Missing usage is unknown. Download before reloading.</p>
+      <button onClick={refreshDiagnostics} disabled={!diagnosticSummary}>Refresh duration</button>
+      <button onClick={downloadDiagnostics} disabled={!diagnosticSummary}>Download JSON summary</button>
+      {diagnosticSummary && <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{JSON.stringify(diagnosticSummary, null, 2)}</pre>}
+    </details>}
   </main>;
 }

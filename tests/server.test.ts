@@ -123,6 +123,20 @@ describe('private retrieval', () => {
   });
 });
 describe('session secrets', () => {
+  it.each(['development', 'production'])('denies public diagnostics in %s even with the feature flag', async mode => {
+    vi.stubEnv('NODE_ENV', mode);
+    vi.stubEnv('VOICE_DIAGNOSTICS_ENABLED', 'true');
+    vi.stubEnv('OPENAI_API_KEY', 'permanent-secret');
+    const fetcher = vi.fn().mockResolvedValue(Response.json({ value: 'ek_temporary', session: {
+      model: 'provider-model', max_output_tokens: 800, instructions: 'PRIVATE', client_secret: 'PRIVATE',
+    } }));
+    vi.stubGlobal('fetch', fetcher);
+    const input = request(); input.headers.set('x-voice-diagnostics', '1');
+    const response = await session(input);
+    expect(response.status).toBe(403);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it('reads business configuration for each new session and ignores client instruction overrides', async () => {
     vi.stubEnv('OPENAI_API_KEY', 'permanent-secret');
     vi.stubEnv('RAG_WRAPPER_API_KEY', 'private-rag-key');

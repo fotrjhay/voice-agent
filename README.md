@@ -1,5 +1,8 @@
 # Business voice assistant
 
+For temporary, admin-only hosted voice testing, see
+[controlled diagnostics setup and disable instructions](HOSTED_DIAGNOSTICS.md).
+
 Single-business Next.js App Router / TypeScript demo with OpenAI Realtime WebRTC, server-side rag-wrapper search, and a private admin dashboard. The dashboard uses **Supabase Auth email/password + Supabase Postgres** and **Dropbox App Folder** document storage. It does not record conversations, embed questions, change vectors, or run ingestion.
 
 ## Run locally

@@ -2,9 +2,10 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { tones, type BusinessSettings } from '../../lib/settings-schema';
+import Link from 'next/link';
 
 type Document = { id: string; name: string; provider: string; revision?: string; documentId?: string; sourceId?: string; modifiedTime?: string };
-export default function AdminDashboard({ voiceUrl = '/' }: { voiceUrl?: string }) {
+export default function AdminDashboard({ voiceUrl = '/', diagnosticsAvailable = false }: { voiceUrl?: string; diagnosticsAvailable?: boolean }) {
   const router = useRouter();
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
   const [version, setVersion] = useState(0);
@@ -102,7 +103,7 @@ export default function AdminDashboard({ voiceUrl = '/' }: { voiceUrl?: string }
     setSettingsStatus('Unsaved changes.');
   }
   return <main className="admin-shell">
-    <header><span className="brand">◉ VOICE DESK <span className="admin-label">ADMIN</span></span><nav aria-label="Admin navigation"><a href={voiceUrl} target="_blank" rel="noreferrer">Open voice assistant</a><button disabled={signingOut} onClick={async () => { setSigningOut(true); try { await call('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); router.replace('/admin/signin'); router.refresh(); } catch { setSettingsError('Could not sign out. Retry.'); setSigningOut(false); } }}>{signingOut ? 'Signing out…' : 'Sign out'}</button></nav></header>
+    <header><span className="brand">◉ VOICE DESK <span className="admin-label">ADMIN</span></span><nav aria-label="Admin navigation"><a href={voiceUrl} target="_blank" rel="noreferrer">Open voice assistant</a>{diagnosticsAvailable && <Link href="/admin/voice-test" prefetch={false}>Voice diagnostics</Link>}<button disabled={signingOut} onClick={async () => { setSigningOut(true); try { await call('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); router.replace('/admin/signin'); router.refresh(); } catch { setSettingsError('Could not sign out. Retry.'); setSigningOut(false); } }}>{signingOut ? 'Signing out…' : 'Sign out'}</button></nav></header>
     <section className="admin-intro"><p className="eyebrow">ONE BUSINESS. ONE PLACE TO MANAGE IT.</p><h1>Your assistant,<br /><span>kept up to date.</span></h1><p>Configure its conversation and add source documents for your business.</p></section>
     <div className="admin-grid"><section className="admin-card" aria-labelledby="settings-heading"><p className="eyebrow">01 · CONVERSATION</p><h2 id="settings-heading">Assistant settings</h2><button disabled={saving} onClick={loadSettings}>Reload saved settings</button><p>Changes apply to new conversations. Keep credentials and private information out of these fields.</p>
       <p role="status" aria-live="polite">{settingsStatus}</p>{settingsError && <p className="error" role="alert">{settingsError} <a href="/admin/signin">Sign in</a></p>}

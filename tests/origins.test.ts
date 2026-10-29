@@ -38,3 +38,10 @@ it('forwards refreshed SSR cookies downstream and back to the browser without pu
   expect(response.headers.get('cache-control')).toBe('private, no-store'); expect(response.headers.get('pragma')).toBe('no-cache');
   expect(response.headers.get('set-cookie')).not.toContain('Domain=');
 });
+
+it('never publicly caches the admin voice test page or its APIs', async () => {
+  for (const path of ['/admin/voice-test', '/api/admin/voice/session', '/api/admin/voice/search']) {
+    const response = await proxy(request('admin.example', path));
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  }
+});

@@ -1,644 +1,241 @@
-# Business voice assistant
+# Business voice assistant — implementation reference
 
-## 1. Document scope
+## 1. Scope and deployment status
 
-This document describes project version `0.1.0`.
-It is for developers, operators, and testers.
-The source review date is October 28, 2026.
-The reviewed implementation includes commit `ea61da2`, which added hosted origin support.
-This revision describes the local Supabase Auth/Postgres and Dropbox dashboard overhaul.
-The admin implementation has not been deployed as part of this task.
-The source repository is [fotrjhay/voice-agent](https://github.com/fotrjhay/voice-agent).
-The hosted demonstration is [voice-agent-six-delta.vercel.app](https://voice-agent-six-delta.vercel.app/).
+This reference describes the backend-selector implementation reviewed on November 5, 2026. The website source is [fotrjhay/voice-agent](https://github.com/fotrjhay/voice-agent); the independently deployed Python service is [fotrjhay/call_agent](https://github.com/fotrjhay/call_agent).
 
-This document uses ASD-STE100 writing principles.
-These include short sentences, active voice, and consistent technical terms.
-Formal compliance with the full standard and its dictionary has not been verified.
-See the [official ASD-STE100 website](https://asd-ste100.org/) for the standard.
+`VOICE_BACKEND=pipecat` is the source default and was selected locally. `VOICE_BACKEND=openai_direct` retains the original browser agent for rollback. This describes implemented code, not proof of a live cutover. At the last recorded check, the Render token authenticated, but the deployed service did not yet report the settings-handoff version. The companion service and website updates were published for review; production website switching and dashboard handoff still needed deployment and manual verification.
 
-Code names, file names, commands, and interface labels retain their exact spelling.
+The operator reported the standalone Render browser agent working on Wi-Fi and mobile data, and inbound Twilio working. Those checks do not establish that the existing website has been switched. No deployment, credential change or live voice test is performed by editing these documents.
 
-## 2. Purpose
+Use [README.md](README.md) for entry-point setup, [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md) for voice rollout/rollback, [ADMIN_SETUP.md](ADMIN_SETUP.md) for Supabase/Dropbox provisioning, and [HOSTED_DIAGNOSTICS.md](HOSTED_DIAGNOSTICS.md) for protected testing.
 
-The application lets a visitor speak with an AI assistant for one business.
-The assistant can search business documents through a separate service.
-The application is a demonstration.
-It has one administrator, a settings dashboard, and Dropbox document upload/listing.
-It has no public registration or document ingestion function.
-See [ADMIN_SETUP.md](ADMIN_SETUP.md) for the complete provisioning and migration procedure.
+## 2. Architecture
 
-The application uses Next.js, React, TypeScript, and OpenAI Realtime.
-The browser sends audio directly to OpenAI through WebRTC.
-The Next.js server keeps permanent API keys on the server.
+The Next.js/React/TypeScript website provides one voice interface and an admin dashboard. The dashboard uses Supabase Auth/Postgres for verified admin membership and saved settings, plus Dropbox App Folder storage for document upload/listing. Uploading is not ingestion or evidence of search availability. The app does not create embeddings, connect to the private knowledge database, or invoke n8n.
 
-### 2.1 Terms
-
-| Term | Meaning in this document |
-| --- | --- |
-| Session | One voice connection between the browser and OpenAI. |
-| Client credential | A temporary credential that lets the browser connect to OpenAI. |
-| Knowledge search | A request for passages from business documents. |
-| Wrapper | The separate service that receives knowledge search requests. |
-| Passage | Text returned by the wrapper. |
-| Origin | The protocol, host, and port of a web address. |
-| Transcript | Text that represents speech in the conversation. |
-
-## 3. System operation
-
-1. The visitor selects **Start conversation**.
-2. The browser requests microphone permission.
-3. The browser sends a request to `POST /api/session`.
-4. The server requests a client credential from OpenAI.
-5. The browser uses the credential to establish a WebRTC connection.
-6. OpenAI processes speech and returns assistant audio.
-7. The browser shows transcript events from OpenAI.
-
-For business questions, the assistant can call `search_knowledge`.
-The browser sends the tool arguments to `POST /api/search`.
-The server sends the query to the configured wrapper.
-The browser returns the passages to the same Realtime session.
-The assistant uses those passages to answer the question.
-
-The application does not create embeddings or change retrieval/vector data.
-Admin settings and rate-limit counters use a separate PostgreSQL schema.
-It does not use a second model to write the answer.
-
-## 4. Requirements
-
-- Node.js 22.14 or a later Node.js 22 release, as specified in `README.md`.
-- npm.
-- A browser with microphone and WebRTC support.
-- A microphone and an audio output device.
-- An OpenAI API key with access to the configured Realtime model.
-- Network access to OpenAI.
-- Optional network access to an authorized wrapper.
-
-Use headphones during voice tests to reduce echo.
-Use localhost for local tests.
-Use HTTPS for a hosted application that needs microphone access.
-
-## 5. Install and start the application
-
-Run these commands in PowerShell.
-
-1. Open the project directory.
-
-   ```powershell
-   Set-Location C:\Software\voice_agent
-   ```
-
-2. Install the dependencies.
-
-   ```powershell
-   npm install
-   ```
-
-3. Create the local configuration file.
-
-   ```powershell
-   Copy-Item .env.example .env.local
-   ```
-
-   If `.env.local` already exists, edit that file instead.
-
-4. Open the configuration file.
-
-   ```powershell
-   notepad .env.local
-   ```
-
-5. Set `OPENAI_API_KEY` to your permanent OpenAI API key.
-6. Save the file.
-7. Start the development server.
-
-   ```powershell
-   npm run dev
-   ```
-
-8. Open [http://localhost:3000](http://localhost:3000).
-
-Leave both wrapper settings empty for a voice test without knowledge search.
-Business answers then have no retrieved evidence.
-
-**CAUTION:** Keep permanent API keys out of source control, prompts, screenshots, and browser code.
-
-## 6. Configure the application
-
-All listed settings are server environment variables.
-Do not add the `NEXT_PUBLIC_` prefix.
-
-| Variable | Function | Default or empty behavior |
+| Responsibility | `pipecat` | `openai_direct` |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | Authenticates the server with OpenAI. | Session creation returns HTTP 503 if empty. |
-| `APP_ORIGIN` | Permits one exact hosted HTTPS origin. | Uses the Vercel production origin when available; otherwise permits only local origins. |
-| `OPENAI_REALTIME_MODEL` | Selects the Realtime model. | `gpt-realtime` |
-| `OPENAI_REALTIME_VOICE` | Selects the assistant voice. | `marin` |
-| `BUSINESS_NAME` | Sets the business identity and page label. | `Your business` |
-| `AGENT_GREETING` | Sets the opening greeting. | `Hello! How can I help you today?` |
-| `AGENT_INSTRUCTIONS` | Sets the business prompt. | A brief instruction for friendly, concise answers. |
-| `RAG_WRAPPER_URL` | Sets the wrapper base URL. | Knowledge search returns `unavailable` if either wrapper setting is empty. |
-| `RAG_WRAPPER_API_KEY` | Authenticates wrapper requests. | Required for knowledge search. |
+| Audio connection | Browser ↔ TURN ↔ Pipecat on Render ↔ OpenAI Realtime | Browser ↔ OpenAI Realtime |
+| Website session route | Proxies authenticated ICE configuration | Mints a temporary OpenAI client credential |
+| SDP exchange | Same-origin website `/api/offer` proxies to Pipecat | Browser calls OpenAI's Realtime calls endpoint |
+| Greeting and responses | Pipecat greeting; native Realtime turn/tool handling | Browser greeting and transcription-triggered turn controller |
+| Retrieval | Python async `search_knowledge` calls rag-wrapper | Browser calls website `/api/search`; Next.js calls rag-wrapper |
+| Business settings snapshot | Website compiles and sends it with the offer | Website compiles it into the client-secret request |
+| Captions | Assistant only, when available | User and assistant |
+| Input transcription | Disabled | `gpt-4o-mini-transcribe`; separate transcription usage can apply |
 
-### 6.1 Change the business prompt
+The browser does not generate responses or execute retrieval in Pipecat mode. The existing direct turn controller is used only in direct mode. Neither mode uses a second answer-writing model. Backend selection affects new browser sessions, not phone provider selection or existing phone configuration.
 
-After the first saved database configuration, use `/admin` to change the business name, greeting, tone, instructions, and public support contacts.
-An authorized Save takes effect for new voice sessions without a restart or redeploy. Saves include an expected version; stale edits return HTTP 409.
-Refresh the public page to update its business label.
-Existing sessions retain their settings.
+## 3. Local setup and configuration
 
-The following environment procedure sets defaults before the first save, or when no database is configured.
-It does not overwrite an existing saved configuration.
+Use Node.js 22.14 or later in the Node.js 22 line, npm, and a microphone/WebRTC-capable browser. Hosted microphone access requires HTTPS; localhost works for development.
 
-1. Open `.env.local`.
-2. Change `BUSINESS_NAME`, `AGENT_GREETING`, or `AGENT_INSTRUCTIONS`.
-3. Save the file.
-4. Stop the server with Ctrl+C.
-5. Start the server again.
-6. Refresh the page.
-7. Start a new conversation.
+```powershell
+Set-Location C:\Software\voice_agent
+npm install
+# Only when absent; otherwise edit the existing file.
+Copy-Item .env.example .env.local
+notepad .env.local
+npm run dev
+```
 
-Use quoted values for multiline instructions in `.env.local`.
-Escape a literal dollar sign as `\$`.
-Shell environment variables take precedence over values in `.env.local`.
-Existing sessions keep their original instructions.
-The server reads the business configuration for each new session credential request.
-Prompt-only changes do not require source edits or a new local production build.
-For local production use, restart `npm start` after changing the environment file.
+Open http://localhost:3000. Keep secrets out of Git, prompts, screenshots and client bundles. Except the Supabase public project identifiers, the variables below are server-only and must not use `NEXT_PUBLIC_`.
 
-The server appends `ASSISTANT_BASELINE` after the business prompt.
-The baseline requires AI disclosure, privacy, supported answers, and truthful action reports.
-The business prompt cannot add server tools.
-Instructions can be visible to the connected client.
-Do not put confidential information in them.
+| Website variable | Purpose / behavior |
+| --- | --- |
+| `VOICE_BACKEND` | `pipecat` by default, or `openai_direct`; other values return an error |
+| `PIPECAT_SERVICE_URL` | Required for Pipecat: HTTPS origin with no credentials, path, query or fragment; loopback HTTP permitted only outside production |
+| `PIPECAT_SERVICE_TOKEN` | Required for Pipecat: same secret as Render `BROWSER_TOKEN`; never returned to visitors |
+| `OPENAI_API_KEY` | Required on the website for direct mode, not Pipecat mode |
+| `OPENAI_REALTIME_MODEL` / `OPENAI_REALTIME_VOICE` | Website direct-mode model/voice, defaults `gpt-realtime` / `marin` |
+| `RAG_WRAPPER_URL` / `RAG_WRAPPER_API_KEY` | Website direct/legacy search configuration; missing values yield unavailable retrieval |
+| `VOICE_APP_ORIGIN` / `ADMIN_APP_ORIGIN` | Exact public voice/admin origins; existing `APP_ORIGIN` and Vercel production-domain fallback remain supported |
+| `VOICE_DIAGNOSTICS_ENABLED` | Exactly `true` enables the protected, opted-in admin test |
+| `BUSINESS_NAME`, `AGENT_GREETING`, `AGENT_TONE`, `AGENT_INSTRUCTIONS`, `SUPPORT_EMAIL`, `SUPPORT_PHONE`, `SUPPORT_URL` | Initial settings before the first saved row or when no database is configured |
+| `ADMIN_DATABASE_URL`, `ADMIN_DATABASE_TLS`, `ADMIN_DATABASE_CA` | Scoped settings/receipt reader and rate-limit connection; see admin guide |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Public Supabase project identifiers for authentication |
+| `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN`, `DROPBOX_UPLOAD_FOLDER`, `DOCUMENT_MAX_UPLOAD_BYTES`, `BUSINESS_ID` | Existing document-storage configuration; see admin guide |
 
-The optional database settings are `ADMIN_DATABASE_URL`, `ADMIN_DATABASE_TLS`, and `ADMIN_DATABASE_CA`.
-Authentication uses `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, SSR cookies, verified user identity and database RLS membership. No Supabase privileged server key is required.
-Admin membership is an explicit Supabase Auth UUID inserted by the operator; authenticated users are not automatically admins.
-Tone defaults use `AGENT_TONE`; public support defaults use `SUPPORT_EMAIL`, `SUPPORT_PHONE`, and `SUPPORT_URL`.
-All are server-side variables with examples in `.env.example`.
+The independent Python service has its own environment. Its `OPENAI_REALTIME_MODEL` defaults to `gpt-realtime-2.1-mini`; its voice variable is `OPENAI_VOICE` (not the website's `OPENAI_REALTIME_VOICE`). It owns its OpenAI/wrapper credentials, result limits, VAD and session limits. Do not copy the website environment file into that service. Account/model availability must be checked separately.
 
-No database URL keeps environment-only voice mode and disables admin access.
-A configured database with no saved row uses validated defaults until the first authenticated Save.
-A configured but unavailable database returns explicit errors and does not silently fall back.
-The app never runs migrations or seeds at startup.
+Next.js loads `.env.local` and the other supported environment files; process environment takes precedence. Restart/redeploy after changing the backend, service connection or environment defaults. On Vercel, select the intended environment and create a new deployment; editing a variable does not modify an already deployed version. Preview origins require explicit configuration.
 
-### 6.2 Connect the wrapper
+## 4. Dashboard settings and precedence
 
-1. Set `RAG_WRAPPER_URL` to the wrapper base URL.
-2. Omit the `/search` suffix.
-3. Set `RAG_WRAPPER_API_KEY`.
-4. Restart the server.
-5. Start a new conversation.
-6. Ask a question with a known answer in the business documents.
-7. Compare the answer with the source document.
+After the first authorized database save, use `/admin` for business name, greeting, supported tone, instructions and support contacts. Saves require an expected version; stale edits return HTTP 409. Refresh the public page to update its label. A new connection loads the current settings; existing connections retain their snapshot.
 
-The Next.js server must be able to reach the wrapper.
-A private hosting address can require access through the same private network.
-The application does not accept or send a tenant parameter.
+No configured database means environment defaults for voice and closed admin access. A configured database with no row uses defaults until the first save. A configured but unavailable/invalid database returns an error instead of silently falling back. Startup does not run SQL migrations or seed data.
 
-### 6.3 Configure a hosted application
+`assistantInstructions()` composes business settings followed by `ASSISTANT_BASELINE`. The baseline covers AI disclosure, privacy, supported facts, retrieved-data boundaries and truthful action reports. Prompts cannot grant tools or select a tenant. In Pipecat mode, the authenticated website supplies validated instructions and greeting for that browser connection, overriding only the service's local prompt/greeting for that connection. Phone calls and standalone tests without a snapshot retain service configuration.
 
-Set `APP_ORIGIN` to the exact public HTTPS origin, such as `https://voice.example.com`.
-Do not include a path, query, fragment, or wildcard.
-On Vercel production, the code can use `VERCEL_PROJECT_PRODUCTION_URL` when `APP_ORIGIN` is empty.
-This fallback requires `VERCEL_ENV=production`.
-Preview origins are not permitted automatically.
+Direct clients can inspect/change their Realtime conversation configuration and see tool passages. Pipecat visitors receive captions/activity and temporary relay credentials, not the service token, prompt or raw passages through this integration. Anyone given the service's shared browser token is a trusted service caller. In both modes prompt wording is behavioral guidance, not authorization.
 
-Apply environment changes through the hosting service's deployment process.
-Then refresh the page and start a new conversation.
+## 5. Production deployment and rollback
 
-The `dev` and `start` scripts listen on `127.0.0.1`.
-A hosting service can require a different interface and port.
-Configure these before deployment.
-Use hosting access protection to restrict a private demonstration.
+Keep the website/dashboard on Vercel and the persistent Python service on Render. Follow [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md) in order:
 
-#### 6.3.1 Update configuration on Vercel
+1. Deploy the companion Pipecat update. `/ready` must report `settings_handoff_version: 1`.
+2. Keep the working Render browser relay settings and `BROWSER_TOKEN`. Configure the website's `PIPECAT_SERVICE_URL`, matching `PIPECAT_SERVICE_TOKEN`, and `VOICE_BACKEND=pipecat` on Vercel.
+3. Deploy the website update. Verify the protected admin test and public interface on Wi-Fi and mobile data, including a new dashboard greeting.
+4. For browser rollback, set `VOICE_BACKEND=openai_direct` and redeploy the website with its OpenAI/retrieval variables present. No database rollback or phone change is required.
 
-1. Open the voice app project in the Vercel dashboard.
-2. Open **Settings → Environment Variables**.
-3. Set the required server variables for the **Production** environment.
-4. For this demonstration, the explicit origin value is `APP_ORIGIN=https://voice-agent-six-delta.vercel.app`.
-5. If system environment variables are enabled, the production domain fallback can supply this origin instead.
-6. Set `BUSINESS_NAME`, `AGENT_GREETING`, and `AGENT_INSTRUCTIONS` as needed.
-7. Enter prompt values without surrounding `.env` quotes or the variable name prefix.
-8. Keep `OPENAI_API_KEY` and `RAG_WRAPPER_API_KEY` in server environment settings.
-9. Save the settings and create a new production deployment.
-10. Wait for deployment to finish, refresh the page, and start a new conversation.
+Pipecat failures do not automatically create a direct OpenAI session. An old handoff protocol or missing acknowledgement is an error. Render restarts/deployments can interrupt calls. Free-instance cold starts can delay setup. Free Render instances have no Shell: verify the test page, selected relay route and logs instead; a shell probe is optional when the plan supports it.
 
-Environment changes do not update an existing Vercel deployment.
-The first deployment of a code change must include the updated source.
-Do not assume that a Git push deployed successfully; check the deployment status.
-See [Vercel environment variables](https://vercel.com/docs/environment-variables) and [system environment variables](https://vercel.com/docs/environment-variables/system-environment-variables).
+For public browser audio the service uses short-lived Twilio TURN credentials on both peers, with TCP port 443 first. The website keeps the permanent service token server-side. The standalone test page accepts that shared token only for trusted testing; the public website does not ask visitors for it. Phone media uses its existing WebSocket transport and does not need this browser TURN path.
 
-#### 6.3.2 Update configuration on Render
-
-1. Open the voice app service in the Render dashboard.
-2. Open **Environment**.
-3. Set the same server variables and the exact Render HTTPS origin in `APP_ORIGIN`.
-4. Enter prompt text without surrounding `.env` quotes or the variable name prefix.
-5. Select **Save and deploy** for environment-only changes to an existing compatible build.
-6. Select **Save, rebuild, and deploy** when the update also requires new source code or a build.
-7. Wait for deployment to finish, refresh the page, and start a new conversation.
-
-**Save only** stores the settings for a later deployment.
-**Restart service** reuses the running deployment's configuration.
-It does not apply newly saved environment values that have not been deployed.
-See [Render environment variables](https://render.com/docs/configure-environment-variables) and [service restarts](https://render.com/docs/deploys#restarting-a-service).
-
-## 7. Use the voice controls
-
-1. Select **Start conversation**.
-2. Permit microphone access when the browser asks.
-3. Wait for the **Listening** status.
-4. Speak your question.
-
-The assistant is configured to respond after a pause in speech.
-Speak while the assistant talks to interrupt its response.
-Verify interruption on the target browser and device.
+## 6. Browser controls and lifecycle
 
 | Control | Result |
 | --- | --- |
-| **Mute microphone** | Disables the microphone audio tracks. |
-| **Unmute microphone** | Enables the microphone audio tracks. |
-| **End conversation** | Stops microphone tracks and closes the voice connection. |
-| **Enable assistant audio** | Retries playback after the browser blocks audio. |
-| **Clear transcript** | Removes the transcript from the displayed page state. |
+| Start conversation | Prepares the selected backend, requests the microphone and establishes audio |
+| Mute / unmute | Disables / enables microphone tracks |
+| End conversation | Aborts requests, stops media/metering and closes channel/peer |
+| Enable assistant audio | Retries blocked playback |
+| Clear transcript | Clears the displayed in-memory captions/transcript |
 
-The browser ends a connected session after ten minutes.
-This timer is not a server access control or a billing limit.
-Connection setup has a 35-second browser timeout.
+Both modes request echo cancellation and noise suppression. Setup has a 90-second browser deadline. The connected browser timer ends the session after ten minutes. Pipecat also enforces its configured server duration (default 600 seconds), inactivity (60) and concurrency (4); direct mode's browser timer is not a server-enforced spending limit. Real interruption, playback and device behavior require manual checks.
 
-## 8. API reference
+The page retains up to 60 items with 8,000 characters per item. End does not clear them; clear/reload or a new conversation does. Pipecat shows assistant captions only; it does not transcribe the visitor. No application audio/transcript history is persisted.
 
-Both public voice routes require matching Host and Origin headers.
-They reject a mismatched `x-forwarded-host` header and a cross-site fetch indication.
-Invalid origin configuration prevents access.
-Responses include `Cache-Control: no-store`.
+## 7. Website API reference
 
-### 8.1 `POST /api/session`
+All public POST voice routes require exact same-origin Host/Origin checks and reject conflicting forwarded hosts/cross-site indications. This is not user authentication. Success/error responses use `Cache-Control: private, no-store`. Public session/offer routes reject the diagnostics opt-in header.
 
-The route uses server configuration.
-It does not use request body fields to configure the session.
+### `POST /api/session`
 
-Successful response:
+Backend selection comes from the server; request-body fields cannot override it.
+
+Pipecat response:
+
+```json
+{"backend":"pipecat","rtcConfig":{"iceServers":[{"urls":"turn:relay.example:443?transport=tcp","username":"temporary","credential":"temporary"}],"iceTransportPolicy":"relay"}}
+```
+
+The example credentials are placeholders. The server authenticates to service `/api/ice` and requires handoff version 1. Only temporary ICE configuration is public; safe configuration reports are added only for an authorized diagnostics request. Upstream calls have a 45-second deadline and reject redirects.
+
+Direct response:
 
 ```json
 {"value":"temporary-client-credential"}
 ```
 
-The server requests a credential with a 60-second expiry from creation.
-This expiry is separate from the connected session duration.
-The server request has a 15-second timeout.
+The website requests a 60-second client-credential expiry and uses a 15-second upstream deadline. That expiry is not the connected session duration. Direct configuration uses server VAD with 600 ms silence, `create_response: false`, `interrupt_response: true`, and 800 output tokens per response. The browser's direct turn controller requests responses after nonempty current-turn transcriptions.
 
-| HTTP status | Meaning |
-| --- | --- |
-| 200 | The route returned a client credential. |
-| 403 | The origin check failed. |
-| 502 | The provider request failed or returned an invalid credential response. |
-| 503 | The permanent OpenAI API key is missing. |
+### `POST /api/offer`
 
-The configured session uses audio output and `gpt-4o-mini-transcribe` input transcription.
-Voice activity detection uses a 600-millisecond silence duration.
-Automatic responses and speech interruption are enabled.
-The maximum output token setting is 800.
-The only configured tool is `search_knowledge`.
-
-### 8.2 `POST /api/search`
-
-Send `Content-Type: application/json`.
-Send only the `query` field:
+Pipecat only. Send `Content-Type: application/json` and exactly:
 
 ```json
-{"query":"What are the business opening hours?"}
+{"type":"offer","sdp":"browser SDP"}
 ```
 
-The route trims the query.
-The query must contain 1 to 1,000 characters after trimming.
-The maximum request body size is 4,096 bytes.
-Extra fields cause HTTP 400.
-An origin check failure causes HTTP 403.
+The request body is limited to 40,000 bytes and SDP to 32,000 characters. Extra settings/backend/tool fields are rejected. The server loads business settings, adds the baseline and greeting, forwards them with SDP, and requires `settings_applied: true`. Visitors receive only `{"type":"answer","sdp":"answer SDP"}`. Direct mode returns HTTP 409 for this route, so clients restart after a backend change.
 
-A valid request returns HTTP 200 with a structured search result:
+### `POST /api/search`
+
+This remains the direct/legacy retrieval route, even when Pipecat is selected; the Pipecat browser path never invokes it. Send only `{"query":"A standalone business question"}`. The query is trimmed and limited to 1–1000 characters; the body is limited to 4096 bytes. Extra fields are rejected. Successful HTTP responses contain `status`, `passages` and `retrieval_ms`; `ok`, `empty` and `unavailable` are distinct retrieval outcomes.
+
+### Protected admin equivalents
+
+`/api/admin/voice/session`, `/api/admin/voice/offer` and `/api/admin/voice/search` independently require the server feature flag, explicit diagnostics opt-in, verified Supabase identity/current membership, origin checks and shared admin-read rate limits. Pipecat uses session/offer; direct mode uses session/search. See [HOSTED_DIAGNOSTICS.md](HOSTED_DIAGNOSTICS.md).
+
+### Errors
+
+| Status | Meaning |
+| --- | --- |
+| 400 | Invalid website offer/search body or missing admin opt-in |
+| 401 / 403 / 404 | Admin access, origin or feature checks rejected the request |
+| 409 | Offer received after the website selected direct mode; restart |
+| 429 | Request limit reached; wait one minute |
+| 502 | Direct OpenAI request/credential failure |
+| 503 | Missing/invalid backend configuration, unavailable service/settings, incompatible handoff, malformed provider response or capacity issue |
+
+Raw provider errors, permanent credentials and database details are not returned.
+
+## 8. Retrieval contract and limits
+
+The relevant server POSTs `{query, limit}` to `{RAG_WRAPPER_URL}/search` with `X-API-Key`. The wrapper selects its tenant through server configuration. There is no caller-supplied tenant or direct database connection.
 
 ```json
-{"status":"empty","passages":[],"retrieval_ms":12}
+{"results":[{"id":"passage-1","text":"Business document text.","source":{"source_id":"document-1","source_name":"Business guide","page_number":2}}]}
 ```
 
-The timing in this example is illustrative.
+Each result requires string ID/text. Source can be absent/null; object source fields are optional/null. The Python client additionally accepts a string source reference. No response distance score proves relevance.
 
-| Search status | Meaning |
+| Limit | Pipecat service defaults | Direct/legacy Next.js route |
+| --- | --- | --- |
+| Results | Configurable, default 3 | 5 |
+| Timeout | Configurable, default 8 seconds | 8 seconds |
+| Response bytes | 256,000 | 256,000 |
+| Individual passage text | Configurable, default 2,000 characters | 2,000 characters |
+| Total passage text | Configurable, default 6,000 characters | At most five bounded passages |
+| Source strings | At most 200 characters each | Source ID 120 / name 200 characters |
+| Browser receives raw passages | No | Yes, for the tool result |
+
+Pipecat uses a reusable async HTTP client, bounds queries/text, cancels obsolete tool work and keeps a bounded session query cache. Neither path retries indefinitely. Upstream authentication, validation, embedding/database/network/timeouts yield safe unavailable outcomes; empty results remain distinct. Configure wrapper reachability on Render for Pipecat and on the website for direct mode. Do not expose the private knowledge database.
+
+## 9. Privacy, diagnostics and operational limits
+
+The app does not record audio or persist transcripts. Provider processing/retention is separate. No conversation tables, TimescaleDB conversation analytics, automatic learning, recording, account actions, bookings, payments, transfers or n8n tools are implemented.
+
+Pipecat operational logs include safe session/transport/model/duration/error metadata, tool latency/count/outcome and provider-reported usage when available. They exclude prompts, audio, transcripts, passages and credentials by default. Website admin diagnostics remain in page memory until explicitly downloaded. Pipecat browser summaries mark unreported response/user-turn counts as null and do not invent usage; direct summaries can contain numeric provider response usage. Neither estimates costs. A deployment/platform logger can have its own retention; the app has no conversation-review database.
+
+Admin login protects admin APIs, not public voice. Origin checks and the hidden service token do not identify customers. Pipecat has per-process concurrency and token-issuance limits, not per-customer quotas or cross-replica coordination. Direct public routes do not provide equivalent server session admission. Additional commercial authentication/quotas are required before treating either as a multi-customer product.
+
+Hosting, OpenAI usage, optional direct-mode input transcription, TURN bandwidth, database/Dropbox resources, phone rental and call minutes are separate costs. Switching browser backends does not stop the other hosted service or release its resources.
+
+## 10. File map
+
+| Path | Responsibility |
 | --- | --- |
-| `ok` | The wrapper returned at least one passage. |
-| `empty` | The wrapper returned no passages. |
-| `unavailable` | Configuration is missing, or the wrapper request failed. |
+| `app/page.tsx`, `app/voice.tsx` | Saved page label, shared controls and selected browser transport |
+| `lib/voice-backend.ts` | Server-only backend validation/default |
+| `lib/voice-session.ts`, `lib/pipecat.ts` | Backend session routing and authenticated Pipecat settings/signaling proxy |
+| `lib/pipecat-client.ts` | Bounded activity/caption/tool messages and cancellable ICE gathering |
+| `lib/voice-turns.ts` | Direct-mode response controller only |
+| `lib/server.ts`, `lib/assistant-instructions.ts` | Direct search/session configuration and business baseline assembly |
+| `lib/cleanup.ts`, `lib/voice-diagnostics.ts` | Browser cleanup and privacy-filtered backend-aware diagnostics |
+| `app/api/session/`, `app/api/offer/`, `app/api/search/` | Same-origin public endpoints |
+| `app/admin/`, `app/api/admin/`, `app/api/auth/` | Protected dashboard, diagnostics and Supabase auth flows |
+| `lib/settings*`, `lib/db.ts`, `lib/rate-limit.ts`, `lib/supabase/` | Saved settings, scoped database, rates and identity |
+| `lib/storage.ts`, `lib/documents.ts`, `lib/upload-validation.ts` | Dropbox/idempotent document operations |
+| `migrations/` | Operator-reviewed admin schema changes; never run on startup |
+| `tests/`, `tests/runtime-smoke.mjs`, `tests/smoke-preload.cjs` | Mocked unit/UI and production HTTP checks; preloader is test-only |
+| `.env.example`, `PIPECAT_MIGRATION.md`, `ADMIN_SETUP.md`, `HOSTED_DIAGNOSTICS.md` | Configuration and operator procedures |
 
-The `retrieval_ms` value measures server time for knowledge search.
-It does not measure speech response time or answer quality.
+The separate `call_agent/` checkout has its own repository and tests. It is excluded from the website Git/build-tool discovery and must be deployed separately.
 
-### 8.3 Wrapper contract
-
-The server appends `/search` to the configured base URL.
-It sends a POST request with these fields:
-
-```json
-{"query":"What are the business opening hours?","limit":5}
-```
-
-The request includes the wrapper key in the `X-API-Key` header.
-The wrapper must return a `results` array:
-
-```json
-{
-  "results": [
-    {
-      "id": "passage-1",
-      "text": "Business document text.",
-      "source": {
-        "source_id": "document-1",
-        "source_name": "Business guide",
-        "page_number": 2
-      }
-    }
-  ]
-}
-```
-
-Each result requires string values for `id` and `text`.
-The `source` object and its fields can be absent or null.
-Source identifiers and names must be strings when present.
-Page numbers must be numbers when present.
-
-| Limit | Value |
-| --- | --- |
-| Wrapper request timeout | 8 seconds |
-| Wrapper response size | 256,000 bytes |
-| Returned passages | 5 |
-| Passage text length | 2,000 characters |
-| Passage identifier length | 120 characters |
-| Source identifier length | 120 characters |
-| Source name length | 200 characters |
-
-Provider errors, invalid responses, and network failures produce `unavailable`.
-The route does not return raw provider error details.
-Returned passages do not prove that an answer is relevant or correct.
-
-## 9. Data and access limits
-
-The application does not persist audio or transcripts.
-The page keeps up to 60 transcript items in memory.
-Each item has a maximum of 8,000 characters.
-Clearing the transcript or reloading the page removes the displayed text.
-Ending a conversation does not clear its displayed transcript.
-Starting a new conversation clears the previous displayed transcript.
-
-Audio and text go to OpenAI.
-Retrieved passages also enter the Realtime conversation.
-Local storage behavior does not establish provider retention behavior.
-Application code does not log questions, passages, audio, or credentials.
-
-### 9.1 Current logging and review features
-
-Next.js and the hosting platform provide request and runtime logs.
-These can help diagnose HTTP failures and server errors.
-Their availability and retention depend on the local process or hosting configuration.
-The application has no dedicated structured event logger or logging dashboard.
-It does not save session events or tool-call history for later review.
-
-The page displays the latest server-measured retrieval duration.
-It does not persist that measurement or measure speech-end to the first useful spoken answer.
-For manual latency tests, exclude filler speech and compare repeated questions under similar conditions.
-
-There is no stored conversation history, business insights report, or automated improvement process.
-The displayed transcript is temporary page state only.
-
-### 9.2 Conversation storage discussed for future work
-
-Conversation recording and TimescaleDB-specific analytics have been discussed but are not implemented.
-The app now supports PostgreSQL for business settings and admin rate limits only.
-There are no conversation tables or conversation-storage endpoints.
-The operator may choose a separate schema in an existing PostgreSQL/TimescaleDB instance or a dedicated reachable database.
-The supplied migration does not alter retrieval/vector tables or ingestion data.
-
-A possible design uses regular PostgreSQL tables within TimescaleDB for conversations, messages, business identifiers, and reviewer feedback.
-Timestamped tool events and latency measurements could use hypertables when the data volume justifies them.
-Keep conversation records in a separate schema with separate permissions from retrieval documents and vectors.
-If audio storage is added, object storage can hold the files and the database can hold their references.
-These are design options, not active features or a verified database deployment.
-
-Before implementation, define customer notice, consent requirements, personal-data handling, access permissions, and retention and deletion rules.
-Insights require reports, queries, or a separate analysis step.
-Reviewed findings can inform knowledge documents, prompts, and evaluation tests.
-Saving conversations does not automatically train or update the assistant.
-
-### 9.3 Access and model limits
-
-The browser can inspect the client credential, instructions, tool arguments, and passages.
-A modified browser client can change Realtime session configuration.
-The application baseline is an instruction to the model, not an enforceable authorization system.
-
-The origin check does not authenticate users.
-Admin operations require a server-verified Supabase user, explicit UUID membership/RLS and distributed PostgreSQL rate limits.
-Admin mutations also require a matching origin.
-Public voice routes have no application authentication, quotas, rate limits, or server-enforced session duration.
-The admin login does not protect those public routes.
-Add those controls before commercial or multi-business use.
-The assistant has no implemented tool for bookings, payments, messages, or record changes.
-
-## 10. Project files
-
-| Path | Purpose |
-| --- | --- |
-| `app/page.tsx` | Reads the business name and renders the voice interface. |
-| `app/voice.tsx` | Controls microphone access, WebRTC, tool calls, and transcripts. |
-| `app/layout.tsx` | Defines the page layout and metadata. |
-| `app/globals.css` | Defines the interface styles. |
-| `app/api/session/route.ts` | Creates client credentials. |
-| `app/api/search/route.ts` | Validates and forwards knowledge queries. |
-| `lib/server.ts` | Defines origin checks, input limits, search, and session settings. |
-| `lib/assistant-instructions.ts` | Combines the business prompt with the application baseline. |
-| `lib/cleanup.ts` | Stops media tracks, closes connections, and cancels requests. |
-| `tests/server.test.ts` | Tests server behavior and resource cleanup with mocks. |
-| `.env.example` | Provides example environment settings. |
-| `README.md` | Provides setup notes and previous verification records. |
-| `ADMIN_SETUP.md` | Provides Supabase provisioning, Dropbox setup, migration/rollback, limits and manual checks. |
-| `app/admin/` | Provides sign-in and the authenticated settings/document dashboard. |
-| `app/api/admin/` | Provides independently authorized settings and document endpoints. |
-| `app/api/auth/[action]/route.ts` | Runs Supabase password login, sign-out, recovery, confirmation and reset endpoints. |
-| `lib/auth.ts`, `lib/supabase/` | Verify Supabase identity, current membership and SSR cookies. |
-| `lib/settings.ts`, `lib/settings-schema.ts` | Read, validate and save business settings. |
-| `lib/db.ts`, `lib/rate-limit.ts` | Use a verified-TLS scoped database connection and distributed limits. |
-| `lib/storage.ts`, `lib/documents.ts`, `lib/upload-validation.ts` | Validate documents and manage Dropbox refresh, listing, durable IDs and idempotent uploads. |
-| `migrations/001_admin.up.sql`, `migrations/001_admin.down.sql` | Supply reviewed schema changes and rollback; never run automatically. |
-| `tests/runtime-smoke.mjs` | Tests Supabase SSR HTTP/cookie behavior against local fake Auth/SQL services. |
-
-## 11. Verify the application
-
-Run these checks from the project directory:
+## 11. Verification and troubleshooting
 
 ```powershell
-npm run test
+npm test
 npm run typecheck
 npm run lint
 npm run build
+node tests/runtime-smoke.mjs
+node tests/runtime-smoke.mjs --pipecat
+# Only against an explicitly configured disposable database:
+npm run test:rls
 ```
 
-For a local production check, run:
+The last implementation run passed 167 Vitest tests, type checking, lint, production build and HTTP smoke tests for both modes. The companion release passed 42 Python tests; the copied service with the pre-existing Telnyx extension passed 52. These are recorded mocked checks, not a new test run by this documentation edit. Browser bundles were scanned for configured secrets. No live SQL policy proof or production website cutover follows from those results.
 
-```powershell
-npm start
-```
+The October 28 admin record remains in [ADMIN_SETUP.md](ADMIN_SETUP.md). The October 29 direct-turn audit remains in [TURN_USAGE_AUDIT.md](TURN_USAGE_AUDIT.md). Those historical counts/configurations are not current Pipecat behavior.
 
-The tests use mocked services.
-They cover origin checks, query validation, search limits, error handling, prompt assembly, and cleanup.
-They do not establish live audio quality or wrapper relevance.
-This document does not report a new live service test.
+For manual acceptance, start a new conversation on Wi-Fi and mobile data, verify a single greeting, knowledge/follow-up/unsupported/failure answers, interrupt speech and pending retrieval, test mute/end/restart and microphone release, and verify a changed dashboard greeting in a fresh session. Check captions appropriate to the backend. Test denied microphone access and cancellation during permission/setup. Do not post captures containing secrets, direct-mode passages or user speech.
 
-### 11.1 Recorded hosted-origin verification (before admin)
-
-The following checks passed on October 27, 2026, for the hosted origin fix in commit `ea61da2`:
-
-| Check | Recorded result |
+| Problem | Check |
 | --- | --- |
-| `npm run test` | All 33 mocked tests passed. |
-| `npm run typecheck` | Passed. |
-| `npm run lint` | Passed without warnings. |
-| `npm run build` | Passed. |
-| Local production origin check | A request with the Vercel production Host and Origin reached query validation and returned HTTP 400 for an empty JSON object. An unrelated Origin returned HTTP 403. |
-| Hosted origin check | The live Vercel `POST /api/search` route returned HTTP 400 for an empty JSON object sent with the matching Origin. |
+| Pipecat startup returns 503 | Website URL/token, Render browser enabled/relay settings, capacity and service availability |
+| Token works but website reports integration failure | Deploy handoff version 1; verify service `/ready` and offer acknowledgement |
+| No Render Shell | Use the standalone authenticated page and logs; look for a selected relay route and working two-way audio |
+| Direct session fails | Explicit `openai_direct`, website OpenAI key/model and network access |
+| Wrong/missing business greeting | Saved settings row, database availability and a fresh connection; Pipecat handoff must be deployed |
+| Retrieval unavailable | Wrapper credentials/reachability on the server that owns the selected path |
+| Origin/auth rejected | Exact existing voice/admin origins, feature opt-in and current verified admin membership |
+| No user captions in Pipecat | Expected: input transcription is disabled |
+| No Pipecat provider usage in browser download | Expected: inspect safe service logs; missing data is unknown |
+| Microphone/audio failure | Browser permissions, connected device, playback control and network/relay access |
 
-The hosted HTTP 400 result confirms that the request passed the origin guard and reached input validation.
-The invalid query did not call OpenAI or the wrapper.
-It does not prove that a voice session or retrieval request succeeded.
-Live microphone behavior, speech playback, interruption, and real retrieval quality remain unverified by these checks.
-Database vector dimensions, ingestion provenance, and embedding compatibility also remain unverified.
-This documentation update did not rerun the application tests or perform a new deployment check.
-
-The preceding records refer to the hosted origin fix before the admin implementation.
-The admin verification record is in [ADMIN_SETUP.md](ADMIN_SETUP.md).
-The earlier implementation used NextAuth; the current HTTP smoke test uses Supabase SSR cookies and local fake services.
-It makes no external provider calls or live database changes.
-
-### 11.2 Admin verification
-
-The current overhaul passed all 113 mocked tests, type checking, lint, and the production build.
-The additional `npm run test:smoke` check passed with real Next.js/Supabase SSR HTTP handling and local fake Auth/SQL services.
-It verified protected routes, saved settings reads/writes, optimistic concurrency, host/origin checks, SSR cookies, sign-out cookie clearing, and revoked-session denial.
-The browser-bundle scan found no permanent credential references.
-The opt-in real RLS test reported SKIP because no disposable Supabase test database was configured.
-No live authorization, PostgreSQL migration, Dropbox upload, n8n change, or Vercel deployment was performed.
-See [ADMIN_SETUP.md](ADMIN_SETUP.md) for the recorded checks and remaining manual setup.
-
-### 11.3 Manual checks
-
-1. Start a conversation without wrapper configuration.
-2. Confirm that audio and captions work.
-3. Confirm that the assistant identifies itself as AI.
-4. Ask a business question and check that the assistant reports missing evidence.
-5. Mute the microphone and check that speech is not transmitted.
-6. Unmute the microphone.
-7. Interrupt an assistant response with speech.
-8. End the conversation and check that the microphone indicator stops.
-9. Deny microphone permission and check the error message.
-10. Cancel connection setup while microphone permission is pending.
-11. Grant the pending permission and check that microphone tracks stop.
-12. Configure an authorized wrapper and ask a question with a known answer.
-13. Compare the returned answer with the source document.
-14. Ask a follow-up question and check that the search includes its context.
-15. Disconnect the wrapper and check that the assistant does not invent an answer.
-16. Check the controls with the keyboard and a screen reader.
-
-Inspect browser responses for accidental permanent key exposure.
-Do not share captures that contain client credentials or business passages.
-
-## 12. Troubleshooting
-
-| Problem | Action |
-| --- | --- |
-| Microphone permission was denied. | Permit microphone access in the browser, then start again. |
-| No microphone was found. | Connect a microphone, then start again. |
-| The microphone is unavailable. | Close other applications that use the microphone, then retry. |
-| Assistant audio is blocked. | Select **Enable assistant audio**. |
-| The origin check fails. | Compare the page origin with `APP_ORIGIN` and the request Host header. |
-| The page shows “Local same-origin access required.” | This message is from the older localhost-only guard. Deploy commit `ea61da2` or later. Set the exact hosted origin or enable the Vercel production-domain fallback, then refresh the page. |
-| Session creation returns HTTP 503. | Set `OPENAI_API_KEY` on the server and restart it. |
-| Session creation returns HTTP 502. | Check model access, server configuration, and network access. |
-| Search returns `unavailable`. | Check both wrapper settings and server access to the wrapper. |
-| Search returns `empty`. | Check that the business documents contain relevant information. |
-| The business prompt did not change. | Restart or redeploy the server, then start a new conversation. |
-| The voice connection closes. | Check the network, then start a new conversation. |
-| Conversation history or structured events are missing. | These features are not implemented. The visible transcript is temporary, and platform logs do not provide a saved conversation review system. |
-
-End unused conversations.
-API use and wrapper operation can incur charges.
-Use provider account controls to manage spending.
-
-## 13. Current admin dashboard: Supabase and Dropbox
-
-The active dashboard has two functions: assistant settings and Dropbox document upload/listing.
-GitHub OAuth and Google Drive dependencies/routes are removed from active use.
-Repository/GitHub deployment integration remains unchanged.
-Old Drive files are not moved, deleted or relabeled as Dropbox files.
-No conversation recording, analytics, billing or ingestion pipeline was added.
-
-Supabase email/password sign-in uses maintained JS/SSR packages.
-The operator must disable public sign-ups in the project, provision an Auth user, and explicitly insert its verified UUID into admin_members.
-Matching an old GitHub account email does not transfer privileges.
-Every sensitive route checks server-verified getUser() identity and current membership.
-Ordinary users cannot grant themselves membership; settings use user-scoped RLS writes.
-Recovery/invite links are verified server-side for expiry/one-time use and membership.
-Tokens arrive in browser fragments and are POSTed to confirmation, not placed in server URL queries.
-See ADMIN_SETUP.md for the required email templates and safe redirect allowlists.
-
-Cookies remain compatible with Supabase SSR: host-only, SameSite=Lax and Secure on HTTPS.
-This flow does not claim HTTP-only cookies.
-The Next.js proxy refreshes validated sessions and marks auth responses private/no-store.
-The current app no longer imposes the old NextAuth one-hour hard expiry; configure Supabase session/JWT and recovery policy.
-Sign-out clears SSR cookies and requests provider global sign-out.
-
-The existing fixed single-business settings record is reused.
-Migration 002 adds a version, explicit membership, RLS and document receipts without overwriting saved settings.
-A stale settings save returns HTTP 409; reload and review before retrying.
-The public reader uses only a scoped server SQL connection, not an anonymous settings policy or browser service-role key.
-New sessions read saved settings immediately, while existing sessions keep their initial configuration.
-The application baseline, tools, model/voice and VAD behavior are preserved.
-
-Dropbox uses one operator-authorized Scoped Access App Folder account.
-Secrets are DROPBOX_APP_KEY, DROPBOX_APP_SECRET and an offline DROPBOX_REFRESH_TOKEN.
-DROPBOX_UPLOAD_FOLDER is relative to that app namespace, for example /documents.
-Access tokens are refreshed in process memory; no environment/file rewrite occurs at runtime.
-The operator-only loopback authorization helper validates OAuth state and stores its result in an ignored local file.
-No public token/setup endpoint or per-admin Dropbox connection exists.
-
-The hard upload ceiling remains 3 MiB, below Vercel's request cap.
-DOCUMENT_MAX_UPLOAD_BYTES may lower it.
-The server validates normalized names, type/content and actual streamed bytes.
-A durable reservation maps the verified user's upload key to a server document UUID and fixed path.
-Retries verify Dropbox content hashes; add/no-autorename/conflict handling avoids duplicates and silent overwrites.
-Different selected files may share a display name without being deduplicated by name.
-Receipts preserve provider label, original display name, Dropbox file ID/revision and stable source/business IDs.
-Pagination shows actual files in the configured folder and separates listing errors from upload success.
-The success label is Uploaded to Dropbox; search availability is not yet tracked.
-
-n8n is unchanged and no webhook is active.
-It must access the same Dropbox App Folder namespace, not merely the same account through another folder app.
-Retain source_id = BUSINESS_ID:document_id across revisions; a revision is not a new logical source.
-The proposed handoff contract and read-scope setup are documented in ADMIN_SETUP.md.
-
-VOICE_APP_ORIGIN and ADMIN_APP_ORIGIN are exact server-configured origins.
-The admin host root renders the same protected admin component without external rewrites or prefix loops.
-/admin still works locally and on the current domain.
-Each host calls same-origin backend routes; cookies are not shared across subdomains.
-Unknown application hosts and cross-origin mutations are rejected.
-Use actual DNS targets from Vercel's project Domains screen.
-
-Admin limits are shared PostgreSQL buckets: auth 30/minute, reads 60, writes 20 and uploads 10.
-Sign-out is exempt from the database limiter but still checks origin.
-Supabase provider rate limits and hosting abuse controls are separate operator requirements.
-Public voice routes are not protected by admin login and still need commercial authentication/quotas.
-
-Review 001 (if absent) and 002 migrations explicitly; startup/build never applies them.
-The 002 rollback preserves saved settings but removes new membership/receipt metadata, so export it first.
-No live migration, OAuth grant, Dropbox upload, n8n change or deployment was performed during implementation.
-Use npm run test:rls only with the explicit disposable-Supabase opt-in to verify real policy behavior.
-Mock tests and local fake-service HTTP tests do not prove live policies, email delivery, Dropbox, domains or microphone behavior.
-See [ADMIN_SETUP.md](ADMIN_SETUP.md) for ordered setup, permissions, rollback and manual acceptance.
+Changing voice backend does not require a Supabase migration, auth-provider change, Dropbox reauthorization, new phone webhook, or database/vector/ingestion modification.

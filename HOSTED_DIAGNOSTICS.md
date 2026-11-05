@@ -1,116 +1,64 @@
 # Controlled hosted voice diagnostics
 
-## Enable for a test
+## Enable a test
 
-1. Push the code through the existing Git deployment process.
-2. In the hosting environment, set the server-only variable
-   `VOICE_DIAGNOSTICS_ENABLED=true`.
-3. Apply the environment change through the normal deployment process.
-4. Sign in at [the existing admin page](https://voice.jayeola.com/admin)
-   with an authorized Supabase admin account.
-5. Select **Voice diagnostics**, or open
-   [the voice test page](https://voice.jayeola.com/admin/voice-test).
-6. Select **I opt in to diagnostics for this voice test**.
-7. Start a conversation.
-8. End the conversation and select **Download JSON summary**.
+1. Deploy the selected backend and, for Pipecat, the settings-handoff service update described in [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md).
+2. Set server-only `VOICE_DIAGNOSTICS_ENABLED=true` on the website and redeploy. The flag must be exactly `true`; there is no `NEXT_PUBLIC_` diagnostics flag.
+3. Sign in through the existing admin origin with a verified Supabase admin account and open `/admin/voice-test` on that same origin.
+4. Select **I opt in to diagnostics for this voice test**, then start the conversation.
+5. End the conversation and select **Download JSON summary** before closing/reloading the page.
 
-The feature is disabled unless the server variable is exactly `true`.
-There is no `NEXT_PUBLIC_` diagnostics flag. Do not change Supabase site URLs,
-redirect URLs, cookie domains, authentication providers, or the existing
-`VOICE_APP_ORIGIN` / `ADMIN_APP_ORIGIN` settings for this feature.
-If the configured admin origin is a separate domain, use `/admin/voice-test`
-on that existing domain instead. Requests remain on the page's origin.
+The test uses the server-selected `VOICE_BACKEND`; it is not a client-selectable provider override. Do not change Supabase providers, redirect URLs, cookie domains or the existing voice/admin origins to enable this feature. The public page has no diagnostic controls. A diagnostics header on public session/offer routes is rejected.
 
-The public voice page has no diagnostics controls. Its normal session and
-retrieval flow is unchanged. Supplying a diagnostics header to the public
-session route is rejected; a URL parameter or client-side flag cannot grant
-admin diagnostics access.
+## Access checks and routes
 
-## Access checks
+The page checks the feature flag and `requireAdmin()`. Supabase `getUser()` verifies identity; current `voice_agent_admin.is_admin` membership controls access. User metadata and the page's client prop are not authorization credentials. Signed-out users are redirected to sign-in; non-admin users do not receive the test component.
 
-The server page checks the feature flag and calls the existing `requireAdmin()`.
-That function verifies identity through Supabase `getUser()` and current database
-membership through `voice_agent_admin.is_admin`. It does not trust user metadata.
-Unauthenticated page requests go to the existing sign-in page. Non-admin users
-do not receive the voice test component.
+Each of these POST routes independently checks the flag, `x-voice-diagnostics: 1`, verified identity/current membership, same origin and the shared PostgreSQL `admin-read` rate limit:
 
-The test uses these separate POST routes:
+| Route | Usage |
+| --- | --- |
+| `/api/admin/voice/session` | Selected backend session/ICE setup |
+| `/api/admin/voice/offer` | Pipecat SDP and server-loaded settings snapshot |
+| `/api/admin/voice/search` | Direct-mode knowledge tool requests |
 
-- `/api/admin/voice/session`
-- `/api/admin/voice/search`
+Pipecat retrieval executes in Python; it does not call the admin search route per tool. Its authorization occurs when the trusted browser session is established. Direct retrieval rechecks admin authorization on every website search request. Rejections do not switch to public routes. Supabase cookie refresh and existing host/origin rules remain in place. Page/API/browser requests use dynamic/private/no-store handling.
 
-Every request requires the server flag, explicit `x-voice-diagnostics: 1` opt-in,
-verified admin identity and membership, the existing same-origin checks, and the
-existing shared `admin-read` rate limit. Origin matching is an additional check,
-not authorization. The page's client prop is not an authorization credential.
+## Measurements by backend
 
-The session route returns only a temporary Realtime credential and selected,
-filtered configuration reports. The recorder starts only after that authorized
-response succeeds. Retrieval rechecks authorization independently. A rejected
-admin retrieval stops the test instead of switching to the public route.
+The recorder starts only after authorized session setup succeeds. Summaries remain in page memory: no diagnostic database, local-storage entry, telemetry upload or automatic console log. Download is explicit; starting another test replaces the summary, reload clears it, and unchecking opt-in after ending discards it.
 
-The existing proxy refreshes Supabase cookies for these `/admin` and `/api/admin`
-paths. Its responses use `Cache-Control: private, no-store`. API successes and
-errors also use private/no-store responses. The test page is dynamically rendered;
-browser requests use `cache: no-store`. No domain, auth, or proxy rules were changed.
+Both modes report backend selection, start/connect/end timestamps, browser connected duration and end reason. Safe configuration fields can include model, voice, output cap and VAD, when supplied. Configuration reports are observations, not proof of provider enforcement.
 
-## Recorded measurements
+| Measurement | `pipecat` | `openai_direct` |
+| --- | --- | --- |
+| Configuration | Filtered service configuration from ICE setup; requested configuration may be empty | Filtered client-secret request/report and channel session updates |
+| Response/user-turn counts | Null: not reported to this browser | Browser response requests and accepted nonempty completed transcription IDs |
+| Response IDs/status/cancellation | Not reported by this integration | Provider-reported channel events when available |
+| Provider token usage | Not reported to browser; inspect safe service usage logs | Numeric per-response provider usage, deduplicated by response ID; missing usage is unknown |
+| Retrieval | Call ID, status, passage count and server tool latency when sent | Client/server timings, passage count, returned character/byte sizes and response/call IDs |
+| Retrieved text sizes | Null; passages are not sent to browser | Measured sizes without retaining passage text in the summary |
+| Conversation captions | Assistant only, outside diagnostics | User/assistant captions, outside diagnostics |
 
-Recordings remain in the current page's memory. There is no diagnostic database,
-local-storage entry, telemetry upload, or console log. A file is created only by
-the explicit JSON download. Starting another test replaces the previous summary.
-Reloading removes it. Unchecking opt-in after ending discards it.
+Pipecat uses native semantic server VAD and tool continuation. Its browser does not send `response.create`, execute tools or drive turns from captions. Direct mode retains the transcription-triggered controller audited in [TURN_USAGE_AUDIT.md](TURN_USAGE_AUDIT.md). Empty fields or arrays in Pipecat summaries must not be interpreted as zero provider usage or no responses. Neither mode invents prices or costs.
 
-The summary includes:
-
-- Session start, connection, and end timestamps; connected duration and end reason.
-- Selected requested and provider-reported model, output cap, voice, transcription,
-  modality, tool-choice, and VAD fields.
-- Input-item/turn, response, event, and tool-call identifiers.
-- Response status and provider cancellation/reason codes when available.
-- Numeric per-response usage, with audio/text/cache structure preserved and
-  deduplication by response ID. Missing usage is `unknown`, not zero.
-- Retrieval counts, client/server timings, passage counts, and returned text sizes
-  in characters and UTF-8 bytes. Missing measurements remain unknown/null.
-- Counts of sent `response.create` events and unique nonempty completed user turns.
-
-Audio, transcripts, prompts, queries, passages, source names, credentials, personal
-details, and provider error messages are excluded from diagnostics. The ordinary
-voice interface still displays its in-memory conversation captions separately.
-Provider usage is not converted into prices or normalized against dashboard CSV
-fields. Configuration reports do not, by themselves, prove output-cap enforcement.
-
-The model, prompts, VAD settings, retrieval bounds, and normal turn handling are
-unchanged by hosted access control.
+Audio, transcripts, prompts, search queries, passages, source names, credentials and raw provider error messages are excluded from downloaded diagnostics. The ordinary conversation caption display is separate in-memory page state. Do not add private content to identifiers or share unredacted provider/network captures.
 
 ## Disable after testing
 
-1. End all active test conversations and close their test pages.
-2. Set `VOICE_DIAGNOSTICS_ENABLED=false`, or remove it, in the hosting environment.
-3. Apply the environment change through the normal deployment process.
-4. Confirm that `/admin/voice-test` is unavailable and both admin voice APIs return
-   HTTP 404. Confirm that the public voice page still works.
+1. End active test conversations and close their pages.
+2. Set `VOICE_DIAGNOSTICS_ENABLED=false` or remove it on the website, then redeploy.
+3. Confirm the test page and all three admin voice APIs return 404 while public voice still works.
 
-The flag is checked at page access, session creation, and every retrieval request.
-It cannot retroactively revoke a direct browser-to-OpenAI connection or erase
-already downloaded files. Close active tests when disabling the feature or
-revoking an administrator. No permanent diagnostic data needs database cleanup.
+The flag is checked at page/session/offer access and direct-mode retrieval. Disabling it or revoking membership does not retroactively terminate an established audio connection, revoke previously issued relay credentials or erase downloaded files. Close active tests explicitly. No diagnostic database cleanup is needed.
 
 ## Verification checklist
 
-1. With the flag off, verify that an admin cannot open the test page or call its APIs.
-2. With the flag on, verify that signed-out and non-admin users cannot obtain a
-   diagnostic credential. Verify that an admin without explicit opt-in is rejected.
-3. As an admin, start an opted-in test. Check configuration reports, one initial
-   response per user item, legitimate tool continuations, and cancellation details.
-4. Ask a known business question. Check retrieval timings and sizes, then end and
-   download JSON. Confirm the absence of spoken text, prompts, passages, and secrets.
-5. Check private/no-store response headers and confirm that the public voice page
-   does not display diagnostics controls.
-6. Disable the server flag after the test.
+1. Flag off: admin test page and all three APIs unavailable.
+2. Flag on: signed-out/non-admin users, missing opt-in and cross-origin requests denied before contacting providers.
+3. Pipecat: verify backend/version/configuration, one greeting, saved dashboard settings and successful knowledge/follow-up; check tool status/latency and acknowledge that response/usage fields are unavailable here.
+4. Direct rollback: verify a single greeting, one initial reply per accepted current-turn transcription, tool continuation/interruption handling and available provider usage reports.
+5. Both: interrupt speech/pending retrieval, mute, end/restart, download the summary and inspect for private text/secrets. Confirm the public page has no diagnostics controls.
+6. Disable diagnostics after testing.
 
-Authorization and privacy checks use mocked services in the test suite. Live hosted
-Supabase sessions, microphone behavior, and provider usage still require the manual
-checks above. No hosting environment or Supabase settings were changed by this update.
-
-Validation: all 143 tests passed. Typecheck, lint, and the production build passed.
+At the last implementation check, the complete website suite had 167 passing mocked tests, plus passing type checking, lint, build and production HTTP smoke checks for both modes. Earlier 143-test diagnostics results predate the selector. Live hosted Supabase authorization, actual website audio, provider enforcement and production cutover need separate verification; standalone Render browser success does not prove those integration checks. This documentation update does not change hosting or Supabase settings.

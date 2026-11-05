@@ -1,3 +1,5 @@
+> Historical implementation brief: this predates the Supabase/Dropbox dashboard and the Pipecat backend selector. It is retained as project history, not current setup instructions. Use [README.md](README.md), [ADMIN_SETUP.md](ADMIN_SETUP.md) and [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md) for the implemented behavior.
+
 # Codex prompt: Voice agent admin dashboard
 
 Work in the existing `voice-agent` Next.js repository. Implement a single-business, admin-only dashboard with two capabilities: (1) edit the voice assistant's business configuration, and (2) upload and list documents in one configured Google Drive folder. Preserve the working voice page and search integration. Implement, verify and document the work, rather than only proposing a plan.

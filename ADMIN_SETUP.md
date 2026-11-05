@@ -1,6 +1,6 @@
 # Dashboard setup: Supabase Auth/Postgres and Dropbox
 
-This version keeps exactly two admin functions: assistant settings and document upload/listing. Public voice, Realtime settings/VAD, the application baseline and rag-wrapper search remain intact. No live migrations, uploads, credential revocations, infrastructure changes, webhooks or deployments are performed by installation or startup.
+This version keeps exactly two admin functions: assistant settings and document upload/listing. The application baseline and rag-wrapper contract remain in place. Browser voice is now selected by server-only `VOICE_BACKEND=pipecat|openai_direct`; see [backend deployment and rollback](PIPECAT_MIGRATION.md). No live migrations, uploads, credential revocations, infrastructure changes, webhooks or deployments are performed by installation or startup.
 
 ## 1. Local installation and configuration
 
@@ -14,10 +14,12 @@ Copy-Item .env.example .env.local
 notepad .env.local
 ```
 
-Keep real credentials in `.env.local` / hosting secrets. Do not paste them into chat or commit them. Public Supabase URL/publishable keys are project identifiers, not privileged credentials. Never prefix database passwords, Dropbox secrets, OpenAI keys or wrapper keys with `NEXT_PUBLIC_`.
+Keep real credentials in `.env.local` / hosting secrets. Do not paste them into chat or commit them. Public Supabase URL/publishable keys are project identifiers, not privileged credentials. Never prefix database passwords, Dropbox secrets, OpenAI keys, wrapper keys or the Pipecat service token with `NEXT_PUBLIC_`.
 
 | Setting | Purpose |
 | --- | --- |
+| `VOICE_BACKEND` | `pipecat` by default; `openai_direct` for browser rollback |
+| `PIPECAT_SERVICE_URL`, `PIPECAT_SERVICE_TOKEN` | Website-only service origin and secret matching Render `BROWSER_TOKEN` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL (public) |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Current publishable key (public); legacy anon key works if the project still uses it |
 | `ADMIN_DATABASE_URL` | Server-only scoped PostgreSQL login in that same Supabase project |
@@ -29,7 +31,15 @@ Keep real credentials in `.env.local` / hosting secrets. Do not paste them into 
 | `DROPBOX_UPLOAD_FOLDER` | Fixed path inside the App Folder namespace; default `/documents` |
 | `DOCUMENT_MAX_UPLOAD_BYTES` | Positive integer, at most 3,145,728 bytes (3 MiB) |
 
-No Supabase service-role/secret key is needed. The server reads only the fixed settings row through its scoped PostgreSQL role; user-scoped Supabase clients perform admin settings reads/writes under RLS. Supabase Storage is not used. Existing OpenAI, model/voice, business-default and rag-wrapper variables remain unchanged.
+No Supabase service-role/secret key is needed. The server reads only the fixed settings row through its scoped PostgreSQL role; user-scoped Supabase clients perform admin settings reads/writes under RLS. Supabase Storage is not used. Business defaults still initialize the first settings row. In Pipecat mode, OpenAI/model/voice/wrapper configuration belongs on the Python service; retain the website’s direct-mode variables if rollback is required. Do not copy the website `.env.local` into the Python service.
+
+### Browser voice settings and backend selection
+
+Deploy the Pipecat settings-handoff update before the website update, configure the website service URL/token, then select `VOICE_BACKEND=pipecat`. See [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md) for the exact environment values and rollout checks. The selector is not a dashboard field and visitors cannot choose it. Changing it requires a website restart/redeploy; it does not require a SQL migration or Supabase auth change.
+
+Both backends load saved settings on the server for each new voice connection. Pipecat receives the compiled business instructions, baseline and greeting with the SDP offer; direct mode sends the configuration when minting the OpenAI client credential. Existing sessions retain their snapshot. The Python service acknowledges applied settings; an old service version is rejected rather than silently using its local prompt. Phone calls continue using their existing service configuration.
+
+To roll browser voice back, set `VOICE_BACKEND=openai_direct` and redeploy the website with its OpenAI/retrieval variables configured. Do not roll back the database or remove saved settings just to switch voice backends. The protected admin voice test uses the selected backend and retains flag, opt-in, membership and origin checks; diagnostics differ by backend as described in [HOSTED_DIAGNOSTICS.md](HOSTED_DIAGNOSTICS.md).
 
 ## 2. Review and apply migrations to Supabase
 
@@ -198,6 +208,7 @@ npm run typecheck
 npm run lint
 npm run build
 npm run test:smoke
+node tests/runtime-smoke.mjs --pipecat
 # Explicit opt-in only, after migrations in a DISPOSABLE Supabase/local project:
 $env:RUN_SUPABASE_RLS_TESTS='yes-disposable'
 $env:SUPABASE_RLS_TEST_DATABASE_URL='<private disposable operator connection>'
@@ -217,7 +228,7 @@ Manual acceptance:
 7. Independently configure/check n8n's same namespace and stable source ID; do not infer ingestion from storage success. Verify no old Drive files/records were moved or relabeled.
 8. Inspect browser bundles/responses/logs for permanent credentials. Test keyboard/mobile/status announcements and public voice/mute/interruption/end/restart/search regression behavior.
 
-All live Supabase policy/SMTP/session behavior, Dropbox authorization/files, n8n, Vercel domains and microphone/audio checks remain unverified unless separately recorded. Automated HTTP smoke tests use a local fake Supabase boundary and in-memory SQL substitute, not live services. Do not configure the test preloader in a deployment.
+Live Supabase policy/SMTP/session behavior, Dropbox authorization/files, n8n, Vercel domains and website microphone/audio checks require separate verification. The operator reported the standalone Render browser test working on Wi-Fi/mobile data; that does not verify the website cutover or dashboard handoff. Automated HTTP smoke tests use a local fake Supabase boundary and in-memory SQL substitute, not live services. Do not configure the test preloader in a deployment.
 
 ### Recorded verification — October 28, 2026
 

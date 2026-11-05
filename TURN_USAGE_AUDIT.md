@@ -2,6 +2,8 @@
 
 Review date: October 29, 2026.
 
+This is a historical audit of the direct OpenAI browser backend, retained for `VOICE_BACKEND=openai_direct` rollback. Its event trace, transcription-triggered responses, client-visible passages and browser usage reports do not describe Pipecat mode. The current server selector, Pipecat turn ownership and diagnostics limits are documented in [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md) and [HOSTED_DIAGNOSTICS.md](HOSTED_DIAGNOSTICS.md). Recorded results below belong to the original audit, not a new production verification.
+
 ## Scope
 
 The model, business prompt, application baseline, retrieval limits, VAD settings,

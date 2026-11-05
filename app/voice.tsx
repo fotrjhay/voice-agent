@@ -4,6 +4,7 @@ import { releaseResources } from '../lib/cleanup';
 import { createVoiceTurns } from '../lib/voice-turns';
 import type { ResponseRequest } from '../lib/voice-turns';
 import { createVoiceDiagnostics, type VoiceDiagnostics } from '../lib/voice-diagnostics';
+import { pipecatEvent, waitForIce } from '../lib/pipecat-client';
 import styles from './voice.module.css';
 import Link from 'next/link';
 
@@ -45,6 +46,7 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
   const [lines, setLines] = useState<Line[]>([]);
   const [retrievalMs, setRetrievalMs] = useState<number | null>(null);
   const [level, setLevel] = useState(0);
+  const [backend, setBackend] = useState<'pipecat' | 'openai_direct' | null>(null);
   const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(false);
   const diagnostics = useRef<VoiceDiagnostics | null>(null);
   const [diagnosticSummary, setDiagnosticSummary] = useState<ReturnType<VoiceDiagnostics['summary']> | null>(null);
@@ -88,7 +90,7 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
     const current = () => active.current === resources && !resources.abort.signal.aborted;
     const fail = (message: string) => { if (current()) { end('Disconnected'); setError(message); } };
     setBusy(true); setError(''); setLines([]); setRetrievalMs(null); setStatus('Requesting microphone');
-    resources.timer = setTimeout(() => fail('Connection timed out. Check your network and try again.'), 35000);
+    resources.timer = setTimeout(() => fail('Connection timed out. The voice service may be starting; please retry.'), 90000);
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) throw new Error('Use a browser with microphone and WebRTC support on localhost.');
       // Resume from the start-button gesture, including on mobile browsers.
@@ -137,6 +139,23 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
         }
         frame = requestAnimationFrame(measure);
       };
+      const credentialResponse = await fetch(requestDiagnostics ? '/api/admin/voice/session' : '/api/session', {
+        method: 'POST', headers: requestDiagnostics ? { 'x-voice-diagnostics': '1' } : {}, signal: resources.abort.signal, cache: 'no-store',
+      });
+      const credential = await credentialResponse.json();
+      if (!credentialResponse.ok) throw new Error(credential.error || 'Could not create session.');
+      if (!current()) return;
+      const selectedBackend = credential.backend === 'pipecat' ? 'pipecat' : 'openai_direct';
+      if (selectedBackend === 'openai_direct' && typeof credential.value !== 'string') throw new Error('Invalid voice session response.');
+      if (selectedBackend === 'pipecat' && !credential.rtcConfig) throw new Error('Audio routing configuration was not returned.');
+      setBackend(selectedBackend);
+      if (requestDiagnostics) {
+        if (!credential.diagnostics) throw new Error('Authorized diagnostics configuration was not returned.');
+        diagnostic = createVoiceDiagnostics(Date.now, startedAt, selectedBackend);
+        diagnostics.current = diagnostic;
+        diagnostic.sessionSetup(credential.diagnostics.requested, credential.diagnostics.reported);
+        refreshDiagnostics();
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
       if (!current()) { stream.getTracks().forEach(t => t.stop()); return; }
       resources.stream = stream;
@@ -147,7 +166,7 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
       const audio = new Audio();
       audio.autoplay = true;
       resources.audio = audio;
-      const peer = new RTCPeerConnection();
+      const peer = new RTCPeerConnection(selectedBackend === 'pipecat' ? credential.rtcConfig : undefined);
       resources.peer = peer;
       peer.ontrack = event => {
         if (!current()) return;
@@ -160,16 +179,16 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
         if (['failed', 'disconnected', 'closed'].includes(peer.connectionState)) fail('Voice connection lost. Start again to reconnect.');
       };
       stream.getTracks().forEach(t => peer.addTrack(t, stream));
-      const channel = peer.createDataChannel('oai-events');
+      const channel = peer.createDataChannel(selectedBackend === 'pipecat' ? 'chat' : 'oai-events');
       resources.channel = channel;
       const send = (event: Record<string, unknown>, request?: ResponseRequest) => {
-        if (current() && channel.readyState === 'open') {
+        if (selectedBackend === 'openai_direct' && current() && channel.readyState === 'open') {
           channel.send(JSON.stringify(event));
           diagnostic?.sent(event, request);
         }
       };
       const calls = new Set<string>();
-      const turns = createVoiceTurns(request => send({ type: 'response.create', event_id: `client_${crypto.randomUUID()}` }, request));
+      const turns = selectedBackend === 'openai_direct' ? createVoiceTurns(request => send({ type: 'response.create', event_id: `client_${crypto.randomUUID()}` }, request)) : null;
       const append = (id: string, who: string, text: string, delta = false) => {
         setLines(previous => {
           const existing = previous.find(line => line.id === id);
@@ -184,13 +203,26 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
         resources.timer = setTimeout(() => { if (current()) end('Session ended after 10 minutes'); }, 600000);
         setConnected(true); setBusy(false); setStatus('Listening');
         diagnostic?.connected();
-        turns.greeting();
+        turns?.greeting();
         refreshDiagnostics();
       };
       channel.onclose = () => fail('Voice channel closed. Start again to reconnect.');
       channel.onerror = () => fail('Voice channel failed. Please try again.');
       channel.onmessage = async message => {
         if (!current()) return;
+        if (selectedBackend === 'pipecat') {
+          const event = pipecatEvent(message.data);
+          if (event?.type === 'caption') append(event.id, 'Assistant', event.text);
+          if (event?.type === 'activity') setStatus({ listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' }[event.status]);
+          if (event?.type === 'tool') {
+            setStatus(event.status === 'searching' ? 'Searching knowledge' : 'Thinking');
+            if (event.latency_ms !== null) setRetrievalMs(event.latency_ms);
+            diagnostic?.pipecatTool(event);
+            refreshDiagnostics();
+          }
+          return;
+        }
+        if (!turns) return;
         try {
           const event = JSON.parse(message.data);
           diagnostic?.received(event);
@@ -254,22 +286,22 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
           if (['session.created', 'session.updated', 'response.created', 'response.done', 'conversation.item.input_audio_transcription.completed'].includes(event.type)) refreshDiagnostics();
         } catch { fail('Could not process the voice session. Please restart.'); }
       };
-      const credentialResponse = await fetch(requestDiagnostics ? '/api/admin/voice/session' : '/api/session', {
-        method: 'POST', headers: requestDiagnostics ? { 'x-voice-diagnostics': '1' } : {}, signal: resources.abort.signal, cache: 'no-store',
-      });
-      const credential = await credentialResponse.json();
-      if (!credentialResponse.ok) throw new Error(credential.error || 'Could not create session.');
-      if (!current()) return;
-      if (requestDiagnostics) {
-        if (!credential.diagnostics) throw new Error('Authorized diagnostics configuration was not returned.');
-        diagnostic = createVoiceDiagnostics(Date.now, startedAt);
-        diagnostics.current = diagnostic;
-        diagnostic.sessionSetup(credential.diagnostics.requested, credential.diagnostics.reported);
-        refreshDiagnostics();
-      }
       const offer = await peer.createOffer();
       await peer.setLocalDescription(offer);
       if (!current()) return;
+      if (selectedBackend === 'pipecat') {
+        await waitForIce(peer, resources.abort.signal);
+        if (!current()) return;
+        const response = await fetch(requestDiagnostics ? '/api/admin/voice/offer' : '/api/offer', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(requestDiagnostics ? { 'x-voice-diagnostics': '1' } : {}) },
+          body: JSON.stringify({ type: 'offer', sdp: peer.localDescription?.sdp }),
+          signal: resources.abort.signal, cache: 'no-store',
+        });
+        const answer = await response.json();
+        if (!response.ok) throw new Error(answer.error || 'Voice connection failed.');
+        if (current()) await peer.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
+        return;
+      }
       const answer = await fetch('https://api.openai.com/v1/realtime/calls', {
         method: 'POST', body: offer.sdp, headers: { Authorization: `Bearer ${credential.value}`, 'Content-Type': 'application/sdp' }, signal: resources.abort.signal,
       });
@@ -322,7 +354,7 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
         <div className={styles.transcriptLog} role="log" aria-label="Conversation transcript" aria-relevant="additions text">
           {lines.length ? lines.map(line => <article className={line.who === 'You' ? styles.userLine : styles.assistantLine} key={line.id}><strong>{line.who === 'Assistant' ? 'Zevon' : line.who}</strong><p>{line.text}</p></article>) : <div className={styles.empty}><svg viewBox="0 0 48 56" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" aria-hidden="true"><path d="M8 2h23l12 13v36a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" /><path d="M30 2v14h13M14 27h19M14 36h19M14 45h14" /></svg><p>Your conversation<br />appears here.</p></div>}
         </div>
-        <p className={styles.transcriptNote}>Live transcription may be imperfect. Text stays in this page’s memory until cleared or reloaded.</p>
+        <p className={styles.transcriptNote}>{backend === 'pipecat' ? 'Assistant captions are shown when available. Your speech is not transcribed. ' : 'Live transcription may be imperfect. '}Text stays in this page’s memory until cleared or reloaded.</p>
       </section>
     </div>
     <footer className={styles.footer}><span>Business answers depend on relevant retrieved evidence.</span><span>{retrievalMs === null ? 'Ready when you are.' : `Last retrieval: ${retrievalMs} ms (server measured)`}</span></footer>

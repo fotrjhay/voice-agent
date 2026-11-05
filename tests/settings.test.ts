@@ -12,6 +12,7 @@ import { HttpError } from '../lib/http-error';
 import type { SupabaseServer } from '../lib/supabase/server';
 
 beforeEach(() => {
+  vi.stubEnv('VOICE_BACKEND', 'openai_direct');
   vi.clearAllMocks(); db.configured.mockReturnValue(false);
   for (const key of ['BUSINESS_NAME', 'AGENT_GREETING', 'AGENT_INSTRUCTIONS', 'AGENT_TONE', 'SUPPORT_EMAIL', 'SUPPORT_PHONE', 'SUPPORT_URL', 'APP_ORIGIN', 'VOICE_APP_ORIGIN', 'ADMIN_APP_ORIGIN', 'VERCEL_ENV']) vi.stubEnv(key, '');
 });

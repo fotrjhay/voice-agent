@@ -6,6 +6,7 @@ vi.mock('../lib/settings', () => ({ getBusinessSettings: mocks.settings, environ
 vi.mock('../lib/supabase/server', () => ({ createSupabaseServer: async () => ({ auth: { getUser: mocks.user }, schema: () => ({ rpc: mocks.membership }) }) }));
 vi.mock('next/navigation', () => ({ notFound: () => { throw new Error('NOT_FOUND'); }, redirect: (url: string) => { throw new Error(`REDIRECT:${url}`); } }));
 import { POST as session } from '../app/api/admin/voice/session/route';
+import { POST as offer } from '../app/api/admin/voice/offer/route';
 import { POST as search } from '../app/api/admin/voice/search/route';
 import { POST as publicSession } from '../app/api/session/route';
 import VoiceTestPage from '../app/admin/voice-test/page';
@@ -17,6 +18,7 @@ function request(path = 'session', optIn = true, origin = 'https://admin.example
   }, ...(path === 'search' ? { body: JSON.stringify({ query: 'Business question' }) } : {}) });
 }
 beforeEach(() => {
+  vi.stubEnv('VOICE_BACKEND', 'openai_direct');
   vi.clearAllMocks();
   vi.stubEnv('NODE_ENV', 'production'); vi.stubEnv('VOICE_DIAGNOSTICS_ENABLED', 'true');
   vi.stubEnv('VOICE_APP_ORIGIN', 'https://voice.example'); vi.stubEnv('ADMIN_APP_ORIGIN', 'https://admin.example');
@@ -32,7 +34,7 @@ afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 it.each(['', 'false', '1', 'TRUE'])('denies page and both APIs with feature flag %j', async flag => {
   vi.stubEnv('VOICE_DIAGNOSTICS_ENABLED', flag);
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
-  for (const [handler, path] of [[session, 'session'], [search, 'search']] as const) {
+  for (const [handler, path] of [[session, 'session'], [search, 'search'], [offer, 'offer']] as const) {
     const response = await handler(request(path));
     expect(response.status).toBe(404); expect(response.headers.get('cache-control')).toBe('private, no-store');
   }
@@ -55,7 +57,7 @@ it.each(['anonymous', 'expired', 'revoked', 'non-admin', 'membership-outage', 'f
   else mocks.user.mockResolvedValue({ data: { user: null }, error: { message: kind } });
   const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
   const expected = ['non-admin', 'forged-metadata'].includes(kind) ? 403 : kind === 'membership-outage' ? 503 : 401;
-  for (const [handler, path] of [[session, 'session'], [search, 'search']] as const) {
+  for (const [handler, path] of [[session, 'session'], [search, 'search'], [offer, 'offer']] as const) {
     const response = await handler(request(path));
     expect(response.status).toBe(expected); expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(await response.text()).not.toContain('PRIVATE');

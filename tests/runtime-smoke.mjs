@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 const adminId = '6f9e4709-8a18-46ee-8a98-f9b8d5ea4520';
 const ordinaryId = '9f9e4709-8a18-46ee-8a98-f9b8d5ea4520';
 let settings = null, version = 0;
+const voiceBackend = process.argv.includes('--pipecat') ? 'pipecat' : 'openai_direct';
+let forwardedAgent = null;
 const sessions = new Map();
 function user(id) { return { id, aud: 'authenticated', role: 'authenticated', email: id === adminId ? 'admin@example.invalid' : 'user@example.invalid', app_metadata: {}, user_metadata: { is_admin: true }, created_at: '2026-10-28T00:00:00Z' }; }
 function session(id) {
@@ -21,6 +23,17 @@ const backend = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const authenticated = sessions.get(req.headers.authorization?.replace('Bearer ', ''));
   const send = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
+  if (url.pathname.startsWith('/pipecat/')) {
+    if (req.headers.authorization !== 'Bearer unused-pipecat-token') return send(401, {});
+    if (url.pathname === '/pipecat/api/ice') return send(200, {
+      settings_handoff_version: 1, iceServers: [{ urls: 'turn:relay.smoke.test:443?transport=tcp', username: 'temporary', credential: 'ephemeral' }], iceTransportPolicy: 'relay',
+    });
+    if (url.pathname === '/pipecat/api/offer') {
+      forwardedAgent = body.agent_config;
+      return send(200, { type: 'answer', sdp: 'synthetic-answer', settings_applied: true });
+    }
+    return send(404, {});
+  }
   if (url.pathname === '/sql') {
     if (body.sql.includes('rate_limits')) return send(200, { rows: [{ hits: 1 }] });
     if (body.sql.startsWith('SELECT settings')) return send(200, { rows: settings ? [{ settings, version, updated_at: new Date().toISOString() }] : [] });
@@ -59,6 +72,7 @@ const child = spawn(process.execPath, ['--require', './tests/smoke-preload.cjs',
     VOICE_APP_ORIGIN: 'https://voice.smoke.test', ADMIN_APP_ORIGIN: 'https://admin.smoke.test', APP_ORIGIN: 'https://voice.smoke.test',
     NEXT_PUBLIC_SUPABASE_URL: backendUrl, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_local_mock',
     ADMIN_DATABASE_URL: 'postgresql://never-connect@invalid.invalid/admin', BUSINESS_NAME: 'Smoke business', AGENT_GREETING: 'Hello', AGENT_INSTRUCTIONS: 'Use evidence.', AGENT_TONE: 'friendly', SUPPORT_EMAIL: '', SUPPORT_PHONE: '', SUPPORT_URL: '',
+    VOICE_BACKEND: voiceBackend, PIPECAT_SERVICE_URL: 'https://pipecat.smoke.test', PIPECAT_SERVICE_TOKEN: 'unused-pipecat-token',
     OPENAI_API_KEY: 'unused-smoke-key', RAG_WRAPPER_URL: 'https://invalid.invalid', RAG_WRAPPER_API_KEY: 'unused', DROPBOX_UPLOAD_FOLDER: '!', DROPBOX_APP_KEY: 'unused', DROPBOX_APP_SECRET: 'unused', DROPBOX_REFRESH_TOKEN: 'unused',
   },
 });
@@ -93,6 +107,21 @@ try {
   assert.ok((await request('/', { host: 'voice.smoke.test', authenticated: false })).text.includes(data.businessName));
   assert.equal((await request('/api/admin/settings', { method: 'PUT', body: { settings: data, version: 1 }, origin: 'https://voice.smoke.test' })).status, 403);
   console.log('PASS actual Supabase SSR cookies, explicit membership, settings persistence/concurrency and same-origin protection (mock provider)');
+  if (voiceBackend === 'pipecat') {
+    const start = await request('/api/session', { method: 'POST', host: 'voice.smoke.test', authenticated: false });
+    assert.equal(start.status, 200);
+    assert.equal(JSON.parse(start.text).backend, 'pipecat');
+    assert.ok(!start.text.includes('unused-pipecat-token'));
+    const answer = await request('/api/offer', { method: 'POST', host: 'voice.smoke.test', authenticated: false,
+      body: { type: 'offer', sdp: 'synthetic-offer' } });
+    assert.equal(answer.status, 200);
+    assert.deepEqual(JSON.parse(answer.text), { type: 'answer', sdp: 'synthetic-answer' });
+    assert.equal(forwardedAgent.greeting, data.greeting);
+    assert.ok(forwardedAgent.instructions.includes(data.instructions));
+    assert.ok(forwardedAgent.instructions.includes('Application baseline'));
+    assert.equal((await request('/api/offer', { method: 'POST', host: 'voice.smoke.test', origin: 'https://evil.example', body: {} })).status, 403);
+    console.log('PASS Pipecat server-only authentication, same-origin signaling and saved-settings handoff');
+  }
   const cookiesBeforeLogout = new Map(jar);
   assert.equal((await request('/api/auth/logout', { method: 'POST', body: {} })).status, 200); assert.equal(jar.size, 0);
   jar = cookiesBeforeLogout;

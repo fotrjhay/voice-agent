@@ -24,12 +24,12 @@ export function relevantConfig(value: unknown) {
     output_modalities: Array.isArray(source.output_modalities) ? source.output_modalities.filter(v => v === 'audio' || v === 'text') : undefined,
     audio: { input: {
       transcription: safe(input.transcription, ['model']),
-      turn_detection: safe(input.turn_detection, ['type', 'create_response', 'interrupt_response', 'silence_duration_ms', 'prefix_padding_ms', 'threshold']),
+      turn_detection: safe(input.turn_detection, ['type', 'create_response', 'interrupt_response', 'silence_duration_ms', 'prefix_padding_ms', 'threshold', 'eagerness']),
     }, output: safe(output, ['voice']) },
   };
 }
 
-export function createVoiceDiagnostics(now: () => number = Date.now, started = now()) {
+export function createVoiceDiagnostics(now: () => number = Date.now, started = now(), backend: 'openai_direct' | 'pipecat' = 'openai_direct') {
   let connected: number | null = null, ended: number | null = null;
   let endReason: string | null = null;
   const turns = new Set<string>();
@@ -94,11 +94,17 @@ export function createVoiceDiagnostics(now: () => number = Date.now, started = n
         passageCount: passages.length, returnedTextCharacters: passages.reduce((sum, p) => sum + (typeof p.text === 'string' ? p.text.length : 0), 0),
         returnedTextBytes: passages.reduce((sum, p) => sum + (typeof p.text === 'string' ? new TextEncoder().encode(p.text).length : 0), 0) });
     },
+    pipecatTool(value: { call_id: string; status: string; count: number | null; latency_ms: number | null }) {
+      retrievals.set(value.call_id, { callId: value.call_id, at: stamp(), status: value.status,
+        serverMs: value.latency_ms, passageCount: value.count,
+        returnedTextCharacters: null, returnedTextBytes: null });
+    },
     summary() {
-      return structuredClone({ schemaVersion: 1, startedAt: new Date(started).toISOString(), connectedAt: connected === null ? null : new Date(connected).toISOString(),
+      return structuredClone({ schemaVersion: 1, backend, startedAt: new Date(started).toISOString(), connectedAt: connected === null ? null : new Date(connected).toISOString(),
         endedAt: ended === null ? null : new Date(ended).toISOString(), endReason,
         connectedDurationMs: connected === null ? 0 : (ended ?? now()) - connected,
-        counts: { responseCreates: creates.length, completedUserTurns: turns.size, retrievals: retrievals.size },
+        counts: { responseCreates: backend === 'pipecat' ? null : creates.length, completedUserTurns: backend === 'pipecat' ? null : turns.size, retrievals: retrievals.size },
+        ...(backend === 'pipecat' ? { limitations: 'Provider responses, user turns and usage are not reported to this browser. See Pipecat operational logs.' } : {}),
         completedTurnIds: [...turns], configurations, responseCreates: creates, responses: [...responses.values()], retrievals: [...retrievals.values()], events });
     },
   };

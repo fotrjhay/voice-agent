@@ -1,4 +1,11 @@
 // Explicit test-process preloader only. All SQL goes to a local in-memory mock, never PostgreSQL.
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+  // Test-only interception keeps the production URL validator active without external requests.
+  if (url.origin === 'https://pipecat.smoke.test') return originalFetch(`${process.env.SMOKE_BACKEND_URL}/pipecat${url.pathname}`, init);
+  return originalFetch(input, init);
+};
 globalThis.voiceAdminPool = {
   async query(sql, values) {
     const response = await fetch(`${process.env.SMOKE_BACKEND_URL}/sql`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql, values }) });

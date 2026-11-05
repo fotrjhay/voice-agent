@@ -1,4 +1,6 @@
 node_modules/
+# Standalone service has its own repository and deployment.
+/call_agent/
 .next/
 .env*
 !.env.example

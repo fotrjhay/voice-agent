@@ -1,5 +1,10 @@
 # Business voice assistant
 
+Browser voice now defaults to Pipecat. Select `VOICE_BACKEND=pipecat` or
+`VOICE_BACKEND=openai_direct` on the website server. See
+[backend setup, deployment order and rollback](PIPECAT_MIGRATION.md).
+The direct OpenAI implementation described below remains available for rollback.
+
 For temporary, admin-only hosted voice testing, see
 [controlled diagnostics setup and disable instructions](HOSTED_DIAGNOSTICS.md).
 

@@ -1,6 +1,16 @@
 import { expect, it } from 'vitest';
 import { createVoiceDiagnostics } from '../lib/voice-diagnostics';
 
+it('marks server-managed Pipecat response counts unknown and retains only tool metadata', () => {
+  const d = createVoiceDiagnostics(Date.now, Date.now(), 'pipecat');
+  d.pipecatTool({ call_id: 'c1', status: 'ok', count: 3, latency_ms: 25 });
+  const summary = d.summary();
+  expect(summary.backend).toBe('pipecat');
+  expect(summary.counts).toEqual({ responseCreates: null, completedUserTurns: null, retrievals: 1 });
+  expect(summary.retrievals[0]).toMatchObject({ passageCount: 3, serverMs: 25, returnedTextCharacters: null });
+  expect(summary.limitations).toContain('not reported');
+});
+
 it('preserves raw numeric usage and deduplicates by response ID', () => {
   const d = createVoiceDiagnostics();
   const usage = { total_tokens: 50, input_tokens: 40, output_tokens: 10,

@@ -9,6 +9,7 @@ function request(body: unknown = { query: 'Opening hours?' }, origin = 'http://l
   return new Request('http://localhost:3000/api/search', { method: 'POST', headers: { host: 'localhost:3000', origin, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
 beforeEach(() => {
+  vi.stubEnv('VOICE_BACKEND', 'openai_direct');
   vi.stubEnv('VOICE_APP_ORIGIN', ''); vi.stubEnv('ADMIN_APP_ORIGIN', ''); vi.stubEnv('APP_ORIGIN', ''); vi.stubEnv('VERCEL_ENV', ''); vi.stubEnv('ADMIN_DATABASE_URL', '');
   vi.stubEnv('AGENT_TONE', ''); vi.stubEnv('SUPPORT_EMAIL', ''); vi.stubEnv('SUPPORT_PHONE', ''); vi.stubEnv('SUPPORT_URL', '');
 });

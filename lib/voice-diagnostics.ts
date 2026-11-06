@@ -94,7 +94,8 @@ export function createVoiceDiagnostics(now: () => number = Date.now, started = n
         passageCount: passages.length, returnedTextCharacters: passages.reduce((sum, p) => sum + (typeof p.text === 'string' ? p.text.length : 0), 0),
         returnedTextBytes: passages.reduce((sum, p) => sum + (typeof p.text === 'string' ? new TextEncoder().encode(p.text).length : 0), 0) });
     },
-    pipecatTool(value: { call_id: string; status: string; count: number | null; latency_ms: number | null }) {
+    pipecatTool(value: { name?: string; call_id: string; status: string; count: number | null; latency_ms: number | null }) {
+      if (value.name && value.name !== 'search_knowledge') return;
       retrievals.set(value.call_id, { callId: value.call_id, at: stamp(), status: value.status,
         serverMs: value.latency_ms, passageCount: value.count,
         returnedTextCharacters: null, returnedTextBytes: null });

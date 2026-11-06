@@ -4,7 +4,7 @@ import { releaseResources } from '../lib/cleanup';
 import { createVoiceTurns } from '../lib/voice-turns';
 import type { ResponseRequest } from '../lib/voice-turns';
 import { createVoiceDiagnostics, type VoiceDiagnostics } from '../lib/voice-diagnostics';
-import { pipecatEvent, waitForIce } from '../lib/pipecat-client';
+import { pipecatEvent, pipecatToolStatus, waitForIce } from '../lib/pipecat-client';
 import styles from './voice.module.css';
 import Link from 'next/link';
 
@@ -215,8 +215,8 @@ export default function Voice({ business, diagnosticsAuthorized = false }: { bus
           if (event?.type === 'caption') append(event.id, 'Assistant', event.text);
           if (event?.type === 'activity') setStatus({ listening: 'Listening', thinking: 'Thinking', speaking: 'Speaking' }[event.status]);
           if (event?.type === 'tool') {
-            setStatus(event.status === 'searching' ? 'Searching knowledge' : 'Thinking');
-            if (event.latency_ms !== null) setRetrievalMs(event.latency_ms);
+            setStatus(pipecatToolStatus(event));
+            if (event.name === 'search_knowledge' && event.latency_ms !== null) setRetrievalMs(event.latency_ms);
             diagnostic?.pipecatTool(event);
             refreshDiagnostics();
           }

@@ -66,7 +66,7 @@ export async function createPipecatOffer(request: Request) {
     } catch { throw new HttpError(400, 'Provide only a valid browser SDP offer.'); }
     const { settings } = await getBusinessSettings();
     const answer = answerSchema.parse(await upstream(request, 'offer', {
-      ...offer, agent_config: { instructions: assistantInstructions(settings), greeting: settings.greeting },
+      ...offer, agent_config: { instructions: assistantInstructions(settings, 'pipecat'), greeting: settings.greeting },
     }));
     return json({ type: answer.type, sdp: answer.sdp });
   } catch (error) { return failure(error); }

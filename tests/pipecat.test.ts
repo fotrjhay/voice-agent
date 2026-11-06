@@ -3,11 +3,11 @@ const mocks = vi.hoisted(() => ({ settings: vi.fn() }));
 vi.mock('../lib/settings', () => ({ getBusinessSettings: mocks.settings, environmentSettings: vi.fn() }));
 import { POST as session } from '../app/api/session/route';
 import { POST as offer } from '../app/api/offer/route';
-import { ASSISTANT_BASELINE } from '../lib/assistant-instructions';
+import { ASSISTANT_BASELINE, PIPECAT_BASELINE, assistantInstructions } from '../lib/assistant-instructions';
 import { voiceBackend } from '../lib/voice-backend';
-import { pipecatEvent, waitForIce } from '../lib/pipecat-client';
+import { pipecatEvent, pipecatToolStatus, waitForIce } from '../lib/pipecat-client';
 
-const business = { businessName: 'Saved business', greeting: 'Saved greeting', tone: 'professional', instructions: 'Use saved knowledge.', supportEmail: '', supportPhone: '', supportUrl: '' };
+const business = { businessName: 'Saved business', greeting: 'Saved greeting', tone: 'professional' as const, instructions: 'Use saved knowledge.', supportEmail: '', supportPhone: '', supportUrl: '' };
 const config = { settings_handoff_version: 1, iceServers: [{ urls: 'turn:relay.example:443?transport=tcp', username: 'temporary', credential: 'ephemeral' }], iceTransportPolicy: 'relay', voice_config: { model: 'configured-model', instructions: 'PRIVATE' } };
 function input(path = 'session', data?: unknown, origin = 'http://localhost:3000') {
   return new Request(`http://localhost:3000/api/${path}`, { method: 'POST', headers: {
@@ -46,7 +46,7 @@ describe('server-selected voice routing', () => {
     const body = JSON.parse(fetcher.mock.calls[0][1].body);
     expect(body.agent_config.greeting).toBe(business.greeting);
     expect(body.agent_config.instructions).toContain(business.instructions);
-    expect(body.agent_config.instructions.endsWith(ASSISTANT_BASELINE)).toBe(true);
+    expect(body.agent_config.instructions.endsWith(PIPECAT_BASELINE)).toBe(true);
     mocks.settings.mockResolvedValueOnce({ settings: { ...business, greeting: 'New greeting' } });
     await offer(input('offer', { type: 'offer', sdp: 'another-offer' }));
     expect(JSON.parse(fetcher.mock.calls[1][1].body).agent_config.greeting).toBe('New greeting');
@@ -113,4 +113,23 @@ it('waits for complete ICE and releases listeners on cancellation or timeout', a
   const cancelled = waitForIce(peer, controller.signal); controller.abort();
   await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
   await expect(waitForIce(peer, new AbortController().signal, 1)).rejects.toThrow('timed out');
+});
+
+it('keeps direct tools restricted while Pipecat follows the Python capabilities', () => {
+  expect(assistantInstructions(business)).toContain('Your only permitted tool is search_knowledge');
+  const instructions = assistantInstructions(business, 'pipecat');
+  expect(instructions).not.toContain('Your only permitted tool');
+  expect(instructions).not.toContain('cannot contact support on the caller');
+  expect(instructions).toContain('If request_follow_up is provided');
+  expect(instructions).toContain('explicit caller consent');
+  expect(assistantInstructions(business).endsWith(ASSISTANT_BASELINE)).toBe(true);
+});
+it.each(['get_pricing', 'request_follow_up'])('shows %s metadata without exposing its result', name => {
+  const event = pipecatEvent(JSON.stringify({type: 'tool', name, call_id: 'call1', status: 'running', lead: 'PRIVATE'}));
+  expect(event?.type).toBe('tool');
+  if (event?.type === 'tool') expect(pipecatToolStatus(event)).toMatch(/pricing|follow-up/);
+  expect(JSON.stringify(event)).not.toContain('PRIVATE');
+  const partial = pipecatEvent(JSON.stringify({type: 'tool', name: 'request_follow_up', call_id: 'call1', status: 'partial'}));
+  if (partial?.type === 'tool') expect(pipecatToolStatus(partial)).toContain('notification unconfirmed');
+  expect(pipecatEvent(JSON.stringify({type: 'tool', name: 'evil', call_id: 'call1', status: 'ok'}))).toBeNull();
 });

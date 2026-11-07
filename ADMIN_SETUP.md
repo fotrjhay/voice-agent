@@ -35,6 +35,17 @@ No Supabase service-role/secret key is needed. The server reads only the fixed s
 
 ### Browser voice settings and backend selection
 
+**There is no Pipecat/OpenAI selector in `/admin`.** The dashboard edits business settings and documents; backend selection is a website server environment setting, not a saved dashboard field.
+
+To change the hosted website backend:
+
+1. In the Vercel website project, open **Settings → Environment Variables**.
+2. Set `VOICE_BACKEND` to exactly `pipecat` or `openai_direct` for the intended deployment environment (for example, Production).
+3. For Pipecat, also configure `PIPECAT_SERVICE_URL` and `PIPECAT_SERVICE_TOKEN` as described in [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md). For direct mode, retain the website's OpenAI/retrieval configuration.
+4. Redeploy the website with the updated variables, then start a new browser voice session. Saving a variable alone does not update an existing deployment.
+
+Locally, edit `VOICE_BACKEND` in the website's `.env.local` and restart the development server. Do not add this variable to the independent Render service to switch the website backend. Neither action adds a dashboard control.
+
 Deploy the Pipecat settings-handoff update before the website update, configure the website service URL/token, then select `VOICE_BACKEND=pipecat`. See [PIPECAT_MIGRATION.md](PIPECAT_MIGRATION.md) for the exact environment values and rollout checks. The selector is not a dashboard field and visitors cannot choose it. Changing it requires a website restart/redeploy; it does not require a SQL migration or Supabase auth change.
 
 Both backends load saved settings on the server for each new voice connection. Pipecat receives the compiled business instructions, baseline and greeting with the SDP offer; direct mode sends the configuration when minting the OpenAI client credential. Existing sessions retain their snapshot. The Python service acknowledges applied settings; an old service version is rejected rather than silently using its local prompt. Phone calls continue using their existing service configuration.

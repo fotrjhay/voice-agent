@@ -120,16 +120,17 @@ it('keeps direct tools restricted while Pipecat follows the Python capabilities'
   const instructions = assistantInstructions(business, 'pipecat');
   expect(instructions).not.toContain('Your only permitted tool');
   expect(instructions).not.toContain('cannot contact support on the caller');
-  expect(instructions).toContain('If request_follow_up is provided');
-  expect(instructions).toContain('explicit caller consent');
+  expect(instructions).toContain('business_assistant');
+  expect(instructions).toContain('service confirmation flow');
   expect(assistantInstructions(business).endsWith(ASSISTANT_BASELINE)).toBe(true);
 });
-it.each(['get_pricing', 'request_follow_up'])('shows %s metadata without exposing its result', name => {
+it.each(['business_assistant'])('shows %s metadata without exposing its result', name => {
   const event = pipecatEvent(JSON.stringify({type: 'tool', name, call_id: 'call1', status: 'running', lead: 'PRIVATE'}));
   expect(event?.type).toBe('tool');
-  if (event?.type === 'tool') expect(pipecatToolStatus(event)).toMatch(/pricing|follow-up/);
+  if (event?.type === 'tool') expect(pipecatToolStatus(event)).toContain('Checking your request');
   expect(JSON.stringify(event)).not.toContain('PRIVATE');
-  const partial = pipecatEvent(JSON.stringify({type: 'tool', name: 'request_follow_up', call_id: 'call1', status: 'partial'}));
+  const partial = pipecatEvent(JSON.stringify({type: 'tool', name: 'business_assistant', call_id: 'call1', status: 'partial'}));
   if (partial?.type === 'tool') expect(pipecatToolStatus(partial)).toContain('notification unconfirmed');
   expect(pipecatEvent(JSON.stringify({type: 'tool', name: 'evil', call_id: 'call1', status: 'ok'}))).toBeNull();
+  expect(pipecatEvent(JSON.stringify({type: 'tool', name: 'request_follow_up', call_id: 'call1', status: 'ok'}))).toBeNull();
 });

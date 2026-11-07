@@ -63,6 +63,8 @@ Next.js loads `.env.local` and the other supported environment files; process en
 
 ## 4. Dashboard settings and precedence
 
+The dashboard has no backend selector. `VOICE_BACKEND` is read from the website server environment, not Supabase business settings. Change it in the Vercel website project's environment variables and redeploy, or edit the website `.env.local` and restart locally. Setting it on Render does not switch the website. See [backend selection steps](ADMIN_SETUP.md#browser-voice-settings-and-backend-selection).
+
 After the first authorized database save, use `/admin` for business name, greeting, supported tone, instructions and support contacts. Saves require an expected version; stale edits return HTTP 409. Refresh the public page to update its label. A new connection loads the current settings; existing connections retain their snapshot.
 
 No configured database means environment defaults for voice and closed admin access. A configured database with no row uses defaults until the first save. A configured but unavailable/invalid database returns an error instead of silently falling back. Startup does not run SQL migrations or seed data.

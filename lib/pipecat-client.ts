@@ -1,6 +1,6 @@
 type PipecatEvent = { type: 'caption'; id: string; text: string }
   | { type: 'activity'; status: 'listening' | 'thinking' | 'speaking' }
-  | { type: 'tool'; name: 'search_knowledge' | 'get_pricing' | 'request_follow_up'; status: string; call_id: string; count: number | null; latency_ms: number | null };
+  | { type: 'tool'; name: 'search_knowledge' | 'business_assistant'; status: string; call_id: string; count: number | null; latency_ms: number | null };
 
 export function pipecatEvent(message: string): PipecatEvent | null {
   try {
@@ -10,7 +10,7 @@ export function pipecatEvent(message: string): PipecatEvent | null {
     if (value.type === 'caption' && identifier(value.id) && typeof value.text === 'string') return { type: 'caption', id: value.id, text: value.text.slice(0, 8000) };
     if (value.type === 'activity' && ['listening', 'thinking', 'speaking'].includes(value.status)) return { type: 'activity', status: value.status };
     const name = value.name ?? 'search_knowledge';
-    if (value.type === 'tool' && ['search_knowledge', 'get_pricing', 'request_follow_up'].includes(name) && identifier(value.call_id) && ['searching', 'running', 'interrupted', 'ok', 'empty', 'unavailable', 'invalid_query', 'no_results', 'partial', 'unknown', 'needs_information', 'invalid_request', 'conflict', 'pending', 'not_found'].includes(value.status)) {
+    if (value.type === 'tool' && ['search_knowledge', 'business_assistant'].includes(name) && identifier(value.call_id) && ['searching', 'running', 'interrupted', 'ok', 'empty', 'unavailable', 'invalid_query', 'answered', 'completed', 'failed', 'partial', 'unknown', 'needs_information'].includes(value.status)) {
       return { type: 'tool', name, call_id: value.call_id, status: value.status,
         count: Number.isInteger(value.count) && value.count >= 0 && value.count <= 50 ? value.count : null,
         latency_ms: Number.isFinite(value.latency_ms) && value.latency_ms >= 0 ? value.latency_ms : null };
@@ -39,13 +39,12 @@ export function waitForIce(peer: RTCPeerConnection, signal: AbortSignal, timeout
 
 export function pipecatToolStatus(event: Extract<PipecatEvent, { type: 'tool' }>): string {
   const progress = event.status === 'searching' || event.status === 'running';
-  if (event.name === 'get_pricing') return progress ? 'Checking pricing' : `Pricing: ${event.status}`;
-  if (event.name === 'request_follow_up') {
-    if (progress) return 'Processing follow-up';
+  if (event.name === 'business_assistant') {
+    if (progress) return 'Checking your request';
     if (event.status === 'partial') return 'Follow-up saved; notification unconfirmed';
-    if (['unknown', 'not_found', 'interrupted'].includes(event.status)) return 'Follow-up outcome unconfirmed';
-    if (event.status === 'needs_information') return 'Follow-up needs details or confirmation';
-    return `Follow-up: ${event.status}`;
+    if (['unknown', 'interrupted'].includes(event.status)) return 'Request outcome unconfirmed';
+    if (event.status === 'needs_information') return 'Details or confirmation needed';
+    return 'Listening';
   }
   return progress ? 'Searching knowledge' : 'Thinking';
 }

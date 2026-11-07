@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { tones, type BusinessSettings } from '../../lib/settings-schema';
 import Link from 'next/link';
 
-type Document = { id: string; name: string; provider: string; revision?: string; documentId?: string; sourceId?: string; modifiedTime?: string };
+type Document = { id: string; name: string; provider: string; revision?: string; documentId?: string; sourceId?: string; modifiedTime?: string; status?: string };
 export default function AdminDashboard({ voiceUrl = '/', diagnosticsAvailable = false }: { voiceUrl?: string; diagnosticsAvailable?: boolean }) {
   const router = useRouter();
   const [settings, setSettings] = useState<BusinessSettings | null>(null);
@@ -92,7 +92,7 @@ export default function AdminDashboard({ voiceUrl = '/', diagnosticsAvailable = 
     uploadingRef.current = true; setUploading(true); setUploadError(''); setUploadStatus('Uploading…');
     try {
       const result = await call('/api/admin/documents', { method: 'POST', headers: { 'Content-Type': selected.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(selected.name), 'X-Upload-Key': uploadKey.current }, body: selected });
-      setUploadStatus(`Uploaded to Dropbox: ${result.file.name}. File ID: ${result.file.id}. Search availability is not yet tracked.`);
+      setUploadStatus(`Uploaded to Dropbox: ${result.file.name}. File ID: ${result.file.id}. Searchable status requires confirmed ingestion and retrieval evidence.`);
       setSelected(null); uploadKey.current = ''; if (fileInput.current) fileInput.current.value = '';
       await loadFiles();
     } catch (error) { setUploadStatus(''); if (!abort.current?.signal.aborted) setUploadError(error instanceof Error ? error.message : 'Upload failed. Refresh the list before retrying.'); }
@@ -119,12 +119,12 @@ export default function AdminDashboard({ voiceUrl = '/', diagnosticsAvailable = 
         <label htmlFor="supportUrl">Support website (optional, HTTPS)</label><input id="supportUrl" type="url" value={settings.supportUrl} maxLength={500} onChange={e => field('supportUrl', e.target.value)} />
         <button className="primary" type="submit">{saving ? 'Saving…' : 'Save settings'}</button>
       </fieldset></form>}
-    </section><section className="admin-card" aria-labelledby="documents-heading"><p className="eyebrow">02 · KNOWLEDGE SOURCES</p><h2 id="documents-heading">Business documents</h2><p>Upload to the configured Dropbox app folder. Search availability is not yet tracked.</p>
+    </section><section className="admin-card" aria-labelledby="documents-heading"><p className="eyebrow">02 · KNOWLEDGE SOURCES</p><h2 id="documents-heading">Business documents</h2><p>Upload to the configured Dropbox app folder. Searchable status requires confirmed ingestion and retrieval evidence.</p>
       <form onSubmit={upload}><label htmlFor="document">Select a document</label><input ref={fileInput} id="document" type="file" accept=".pdf,.docx,.txt,.md,.text,.csv,.json" disabled={uploading} onChange={e => { setSelected(e.target.files?.[0] || null); uploadKey.current = crypto.randomUUID(); setUploadError(''); setUploadStatus(''); }} /><p className="field-note">PDF, DOCX, TXT, MD, TEXT, CSV or JSON. Maximum 3 MiB; the operator may set a lower limit. Text must use UTF-8.</p><button className="primary" type="submit" disabled={!selected || uploading}>{uploading ? 'Uploading…' : 'Upload to Dropbox'}</button></form>
       <p role="status" aria-live="polite" className="upload-status">{uploadStatus}</p>{uploadError && <p className="error" role="alert">{uploadError}</p>}<p className="field-note">Retries of the same selected file reuse its upload key. Different selections create new documents, even with the same name. No existing file is overwritten.</p>
       <div className="section-title"><h3>Files in the configured folder</h3><button disabled={listing || uploading} onClick={() => loadFiles()}>Refresh list</button></div>
       {listError && <p className="error" role="alert">{listError} <a href="/admin/signin">Sign in</a></p>}<p role="status">{listing ? 'Loading files…' : `${files.length} files shown. Pages contain up to 50 files.`}</p>
-      <ul className="document-list">{files.map(file => <li key={file.id}><strong>{file.name}</strong><span>File ID: {file.id}</span><span>Provider: {file.provider} · Revision: {file.revision || 'Not provided'}</span><span>Source ID: {file.sourceId || 'Not registered by this app'}</span><span>Modified: {file.modifiedTime ? new Date(file.modifiedTime).toLocaleString() : 'Not provided'}</span></li>)}</ul>
+      <ul className="document-list">{files.map(file => <li key={file.id}><strong>{file.name}</strong><span>File ID: {file.id}</span><span>Provider: {file.provider} · Revision: {file.revision || 'Not provided'}</span><span>Status: {file.status || 'uploaded'}</span><span>Source ID: {file.sourceId || 'Not registered by this app'}</span><span>Modified: {file.modifiedTime ? new Date(file.modifiedTime).toLocaleString() : 'Not provided'}</span></li>)}</ul>
       {nextPage && <button disabled={listing} onClick={() => loadFiles(nextPage)}>Load next 50 files</button>}
     </section></div>
     <footer><span>Private administration · Sessions managed by Supabase</span><span>Dropbox upload confirms storage only. n8n handles ingestion separately.</span></footer>

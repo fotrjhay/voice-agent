@@ -1,9 +1,11 @@
+> Cleanup release: apply additive migrations 003 and 004 after 002; see [CLEANUP_RELEASE.md](CLEANUP_RELEASE.md) for shared configuration, processing status and rollback.
+
 # Business voice assistant
 
 Browser voice now defaults to Pipecat. Select `VOICE_BACKEND=pipecat` or
 `VOICE_BACKEND=openai_direct` on the website server. See
 [backend setup, deployment order and rollback](PIPECAT_MIGRATION.md).
-Both backends use the existing interface and dashboard. Backend changes require a restart/redeploy; saved business settings apply to new sessions without a redeploy. The implemented default does not prove that a production cutover has occurred.
+Both backends use the existing interface and dashboard. **There is no backend dropdown in `/admin`.** Choose the backend through the website server's `VOICE_BACKEND` environment variable, not a Render setting. Backend changes require a restart/redeploy; saved business settings apply to new sessions without a redeploy. The implemented default does not prove that a production cutover has occurred.
 
 For temporary, admin-only hosted voice testing, see
 [controlled diagnostics setup and disable instructions](HOSTED_DIAGNOSTICS.md).
@@ -50,7 +52,7 @@ The dashboard uploads PDF, DOCX, TXT, MD, TEXT, CSV and JSON, limited to **3 MiB
 
 PostgreSQL reserves a stable server document UUID and fixed Dropbox path for each verified user's upload key. Retried/concurrent requests reuse that path and verify Dropbox content hash. Add mode/no autorename/conflict handling prevents silent overwrites. Different selections can create distinct documents with the same display name. List pagination reads actual Dropbox folder contents and restores stored original names/IDs/revisions where registered. Status is **Uploaded to Dropbox**; **search availability is not yet tracked**. Listing failures do not turn a successful upload into a false upload failure.
 
-No Google Drive files are moved/deleted, and no ingestion API or n8n webhook is called. No persisted Drive receipts existed in this inspected implementation. Operators must independently verify n8n sees the **same Dropbox account and App Folder namespace**; another App Folder app on the same account has a different namespace. See the stable `source_id`/revision handoff contract in [ADMIN_SETUP.md](ADMIN_SETUP.md).
+No Google Drive files are moved/deleted. With INGESTION_SERVICE_URL and INGESTION_API_KEY configured, new uploads dispatch ingestion once; without them the receipt confirms upload only. No persisted Drive receipts existed in this inspected implementation. Operators must independently verify n8n sees the **same Dropbox account and App Folder namespace**; another App Folder app on the same account has a different namespace. See the stable `source_id`/revision handoff contract in [ADMIN_SETUP.md](ADMIN_SETUP.md).
 
 ## Domains and access boundaries
 

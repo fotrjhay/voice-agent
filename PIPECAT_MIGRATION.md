@@ -4,6 +4,14 @@
 The default is `pipecat`. Invalid values fail closed. Restart locally or redeploy
 Vercel after changing it. There is no automatic provider fallback.
 
+## Where to change the backend
+
+There is no backend dropdown in `/admin`. The dashboard saves business instructions, greeting and support details; it does not save `VOICE_BACKEND`.
+
+For the hosted website, open the **Vercel website project → Settings → Environment Variables**, set `VOICE_BACKEND` for the intended environment, and redeploy the website. Use `pipecat` for the Render service or `openai_direct` for the original browser agent. Configure that backend's required credentials before testing a new session. Setting `VOICE_BACKEND` on Render does not change the website's selection.
+
+For local development, set the variable in the website's `.env.local` and restart the development server. See [admin setup](ADMIN_SETUP.md#browser-voice-settings-and-backend-selection) for the operator steps.
+
 ## Recorded rollout state
 
 At the November 5 implementation check, Pipecat was selected locally and the supplied service token authenticated to Render. The deployed service did not yet advertise the settings-handoff version. The operator reported standalone Render browser audio working on Wi-Fi/mobile data and inbound Twilio working; website switching/dashboard handoff was not yet verified. The source changes were published as [service PR #2](https://github.com/fotrjhay/call_agent/pull/2) and [website PR #1](https://github.com/fotrjhay/voice-agent/pull/1). These are review/deployment references, not evidence that either update is live. This documentation update does not deploy or change environment variables.
